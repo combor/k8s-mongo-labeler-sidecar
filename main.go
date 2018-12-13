@@ -82,7 +82,10 @@ func (l *Labeler) setPrimaryLabel() error {
 		}
 		logrus.Debugf("Setting labels %v", labels)
 		pod.SetLabels(labels)
-		l.K8scli.CoreV1().Pods(l.Config.Namespace).Update(&pod)
+		_, err := l.K8scli.CoreV1().Pods(l.Config.Namespace).Update(&pod)
+		if err != nil {
+			return err
+		}
 	}
 	if !found {
 		return fmt.Errorf("Primary not found")
@@ -155,10 +158,10 @@ func (l *Labeler) getMongoPrimary() (string, error) {
 	}
 	reply := wm.(wiremessage.Reply)
 	doc, err := reply.GetMainDocument()
+	logrus.Debugf("Hosts %s", doc)
 	if primaryHost, ok := doc.Lookup("primary").StringValueOK(); ok {
 		primary := strings.Split(primaryHost, ".")[0]
 		if len(primary) != 0 {
-			logrus.Debugf("Primary host %s", primary)
 			return primary, nil
 		}
 	}
