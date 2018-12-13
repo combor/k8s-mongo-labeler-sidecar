@@ -68,15 +68,17 @@ func (l *Labeler) setPrimaryLabel() error {
 	}
 
 	for _, pod := range pods.Items {
+		labels := pod.GetLabels()
 		if pod.GetName() == primary {
 			logrus.Infof("Seting primary to %s", primary)
-			labels := pod.GetLabels()
 			labels["primary"] = "true"
-			logrus.Debugf("Setting labels %v", labels)
-			pod.SetLabels(labels)
-			l.K8scli.CoreV1().Pods(l.Config.Namespace).Update(&pod)
 			return nil
+		} else {
+			delete(labels, "primary")
 		}
+		logrus.Debugf("Setting labels %v", labels)
+		pod.SetLabels(labels)
+		l.K8scli.CoreV1().Pods(l.Config.Namespace).Update(&pod)
 	}
 	return fmt.Errorf("Primary not found")
 }
