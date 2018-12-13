@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -15,6 +17,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/clientcmd"
 )
 
 type Config struct {
@@ -66,20 +69,25 @@ func (l *Labeler) setPrimaryLabel() error {
 	if err != nil {
 		return err
 	}
-
+	var found bool
+	logrus.Debugf("Found %d pods", len(pods.Items))
 	for _, pod := range pods.Items {
 		labels := pod.GetLabels()
 		if pod.GetName() == primary {
 			logrus.Infof("Seting primary to %s", primary)
 			labels["primary"] = "true"
-			return nil
+			found = true
+		} else {
+			delete(labels, "primary")
 		}
-		delete(labels, "primary")
 		logrus.Debugf("Setting labels %v", labels)
 		pod.SetLabels(labels)
 		l.K8scli.CoreV1().Pods(l.Config.Namespace).Update(&pod)
 	}
-	return fmt.Errorf("Primary not found")
+	if !found {
+		return fmt.Errorf("Primary not found")
+	}
+	return nil
 }
 
 func getConfigFromEnvironment() (*Config, error) {
@@ -94,18 +102,43 @@ func getConfigFromEnvironment() (*Config, error) {
 		Namespace:     os.Getenv("NAMESPACE"),
 		LogLevel:      logrus.InfoLevel,
 	}
-	if _, ok = os.LookupEnv("DEBUG"); !ok {
+	if _, ok = os.LookupEnv("DEBUG"); ok {
 		config.LogLevel = logrus.DebugLevel
 	}
 	return config, nil
 }
 
 func getKubeClientSet() (*kubernetes.Clientset, error) {
-	config, err := rest.InClusterConfig()
+
+	if _, ok := os.LookupEnv("KUBERNETES_SERVICE_HOST"); ok {
+		config, err := rest.InClusterConfig()
+		if err != nil {
+			return nil, err
+		}
+		return kubernetes.NewForConfig(config)
+	}
+
+	var kubeconfig *string
+	if home := homeDir(); home != "" {
+		kubeconfig = flag.String("kubeconfig", filepath.Join(home, ".kube", "config"), "(optional) absolute path to the kubeconfig file")
+	} else {
+		kubeconfig = flag.String("kubeconfig", "", "absolute path to the kubeconfig file")
+	}
+	flag.Parse()
+
+	// use the current context in kubeconfig
+	config, err := clientcmd.BuildConfigFromFlags("", *kubeconfig)
 	if err != nil {
 		return nil, err
 	}
 	return kubernetes.NewForConfig(config)
+}
+
+func homeDir() string {
+	if h := os.Getenv("HOME"); h != "" {
+		return h
+	}
+	return os.Getenv("USERPROFILE") // windows
 }
 
 func (l *Labeler) getMongoPrimary() (string, error) {
