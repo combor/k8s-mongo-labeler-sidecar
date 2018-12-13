@@ -20,6 +20,7 @@ import (
 type Config struct {
 	LabelSelector string
 	Namespace     string
+	LogLevel      logrus.Level
 }
 
 type Labeler struct {
@@ -71,6 +72,7 @@ func (l *Labeler) setPrimaryLabel() error {
 			logrus.Infof("Seting primary to %s", primary)
 			labels := pod.GetLabels()
 			labels["primary"] = "true"
+			logrus.Debugf("Setting labels %v", labels)
 			pod.SetLabels(labels)
 			l.K8scli.CoreV1().Pods(l.Config.Namespace).Update(&pod)
 			return nil
@@ -85,10 +87,16 @@ func getConfigFromEnvironment() (*Config, error) {
 	if l, ok = os.LookupEnv("LABEL_SELECTOR"); !ok {
 		return nil, fmt.Errorf("Please export LABEL_SELECTOR")
 	}
-	return &Config{
+
+	config := &Config{
 		LabelSelector: l,
 		Namespace:     os.Getenv("NAMESPACE"),
-	}, nil
+		LogLevel:      logrus.InfoLevel,
+	}
+	if _, ok = os.LookupEnv("DEBUG"); !ok {
+		config.LogLevel = logrus.DebugLevel
+	}
+	return config, nil
 }
 
 func getKubeClientSet() (*kubernetes.Clientset, error) {
@@ -116,6 +124,7 @@ func (l *Labeler) getMongoPrimary() (string, error) {
 	if primaryHost, ok := doc.Lookup("primary").StringValueOK(); ok {
 		primary := strings.Split(primaryHost, ".")[0]
 		if len(primary) != 0 {
+			logrus.Debugf("Primary host %s", primary)
 			return primary, nil
 		}
 	}
@@ -127,6 +136,8 @@ func main() {
 	if err != nil {
 		logrus.Fatal(err)
 	}
+	logrus.SetLevel(labeler.Config.LogLevel)
+	logrus.Infof("Setting logging level to %s", labeler.Config.LogLevel.String())
 
 	ticker := time.NewTicker(5 * time.Second).C
 	done := make(chan bool)
@@ -135,7 +146,7 @@ func main() {
 		case <-ticker:
 			err := labeler.setPrimaryLabel()
 			if err != nil {
-				logrus.Error(err)
+				logrus.Debug(err)
 			}
 		case <-done:
 			logrus.Info("Done")
