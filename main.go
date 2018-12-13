@@ -73,9 +73,8 @@ func (l *Labeler) setPrimaryLabel() error {
 			logrus.Infof("Seting primary to %s", primary)
 			labels["primary"] = "true"
 			return nil
-		} else {
-			delete(labels, "primary")
 		}
+		delete(labels, "primary")
 		logrus.Debugf("Setting labels %v", labels)
 		pod.SetLabels(labels)
 		l.K8scli.CoreV1().Pods(l.Config.Namespace).Update(&pod)
@@ -130,7 +129,7 @@ func (l *Labeler) getMongoPrimary() (string, error) {
 			return primary, nil
 		}
 	}
-	return "", fmt.Errorf("Can't find primary server.")
+	return "", fmt.Errorf("Can't find primary server")
 }
 
 func main() {
