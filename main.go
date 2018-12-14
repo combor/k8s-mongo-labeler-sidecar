@@ -158,7 +158,7 @@ func (l *Labeler) getMongoPrimary() (string, error) {
 	}
 	reply := wm.(wiremessage.Reply)
 	doc, err := reply.GetMainDocument()
-	logrus.Debugf("Hosts %s", doc)
+	logrus.Debugf("Hosts %s", doc.Lookup("hosts").Array())
 	if primaryHost, ok := doc.Lookup("primary").StringValueOK(); ok {
 		primary := strings.Split(primaryHost, ".")[0]
 		if len(primary) != 0 {
