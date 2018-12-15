@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mongodb/mongo-go-driver/x/bsonx"
 	"github.com/mongodb/mongo-go-driver/x/network/address"
 	"github.com/mongodb/mongo-go-driver/x/network/command"
 	"github.com/mongodb/mongo-go-driver/x/network/connection"
@@ -158,7 +159,12 @@ func (l *Labeler) getMongoPrimary() (string, error) {
 	}
 	reply := wm.(wiremessage.Reply)
 	doc, err := reply.GetMainDocument()
-	logrus.Debugf("Hosts %s", doc.Lookup("hosts").Array())
+	var hosts bsonx.Arr
+	var ok bool
+	if hosts, ok = doc.Lookup("hosts").ArrayOK(); !ok {
+		return "", fmt.Errorf("No hosts found for replica")
+	}
+	logrus.Debugf("Hosts %s", hosts)
 	if primaryHost, ok := doc.Lookup("primary").StringValueOK(); ok {
 		primary := strings.Split(primaryHost, ".")[0]
 		if len(primary) != 0 {
