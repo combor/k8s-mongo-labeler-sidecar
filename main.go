@@ -187,7 +187,7 @@ func main() {
 		case <-ticker:
 			err := labeler.setPrimaryLabel()
 			if err != nil {
-				logrus.Debug(err)
+				logrus.Error(err)
 			}
 		case <-done:
 			logrus.Info("Done")
