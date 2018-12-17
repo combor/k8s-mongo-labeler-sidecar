@@ -28,9 +28,8 @@ type Config struct {
 }
 
 type Labeler struct {
-	Config          *Config
-	K8scli          *kubernetes.Clientset
-	MongoConnection connection.Connection
+	Config *Config
+	K8scli *kubernetes.Clientset
 }
 
 func New() (*Labeler, error) {
@@ -42,18 +41,9 @@ func New() (*Labeler, error) {
 	if err != nil {
 		return nil, err
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-	defer cancel()
-	var addr address.Address
-	addr = "localhost:27017"
-	c, _, err := connection.New(ctx, addr)
-	if err != nil {
-		return nil, err
-	}
 	return &Labeler{
-		Config:          config,
-		K8scli:          k8scli,
-		MongoConnection: c,
+		Config: config,
+		K8scli: k8scli,
 	}, nil
 
 }
@@ -148,12 +138,20 @@ func homeDir() string {
 func (l *Labeler) getMongoPrimary() (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
-	isMaster, err := (&command.IsMaster{}).Encode()
-	err = l.MongoConnection.WriteWireMessage(ctx, isMaster)
+	var addr address.Address
+	addr = "localhost:27017"
+	c, _, err := connection.New(ctx, addr)
 	if err != nil {
 		return "", err
 	}
-	wm, err := l.MongoConnection.ReadWireMessage(ctx)
+	defer c.Close()
+
+	isMaster, err := (&command.IsMaster{}).Encode()
+	err = c.WriteWireMessage(ctx, isMaster)
+	if err != nil {
+		return "", err
+	}
+	wm, err := c.ReadWireMessage(ctx)
 	if err != nil {
 		return "", err
 	}
