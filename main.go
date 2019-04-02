@@ -24,6 +24,8 @@ import (
 type Config struct {
 	LabelSelector string
 	Namespace     string
+	Address       string
+	LabelAll      bool
 	LogLevel      logrus.Level
 }
 
@@ -63,13 +65,23 @@ func (l *Labeler) setPrimaryLabel() error {
 	var found bool
 	logrus.Debugf("Found %d pods", len(pods.Items))
 	for _, pod := range pods.Items {
+		name := pod.GetName()
 		labels := pod.GetLabels()
-		if pod.GetName() == primary {
-			logrus.Infof("Seting primary to %s", primary)
+		if name == primary {
+			if labels["primary"] != "true" {
+				logrus.Infof("Setting primary to true for pod %s", name)
+			}
 			labels["primary"] = "true"
 			found = true
 		} else {
-			delete(labels, "primary")
+			if l.Config.LabelAll == true {
+				if labels["primary"] != "false" {
+					logrus.Infof("Setting primary to false for pod %s", name)
+				}
+				labels["primary"] = "false"
+			} else {
+				delete(labels, "primary")
+			}
 		}
 		logrus.Debugf("Setting labels %v", labels)
 		pod.SetLabels(labels)
@@ -92,9 +104,21 @@ func getConfigFromEnvironment() (*Config, error) {
 	}
 
 	config := &Config{
-		LabelSelector: l,
-		Namespace:     os.Getenv("NAMESPACE"),
-		LogLevel:      logrus.InfoLevel,
+		LabelSelector:	l,
+		Namespace:	"default",
+		Address:	"localhost:27017",
+		LabelAll:	false,
+		LogLevel:	logrus.InfoLevel,
+	}
+
+	if l, ok = os.LookupEnv("NAMESPACE"); ok {
+		config.Namespace = l
+	}
+	if l, ok = os.LookupEnv("MONGO_ADDRESS"); ok {
+		config.Address = l
+	}
+	if _, ok = os.LookupEnv("LABEL_ALL"); ok {
+		config.LabelAll = true
 	}
 	if _, ok = os.LookupEnv("DEBUG"); ok {
 		config.LogLevel = logrus.DebugLevel
@@ -139,7 +163,7 @@ func (l *Labeler) getMongoPrimary() (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	var addr address.Address
-	addr = "localhost:27017"
+	addr = address.Address(l.Config.Address)
 	c, _, err := connection.New(ctx, addr)
 	if err != nil {
 		return "", err
