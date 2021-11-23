@@ -4,7 +4,8 @@
 // not use this file except in compliance with the License. You may obtain
 // a copy of the License at http://www.apache.org/licenses/LICENSE-2.0
 
-package version
+//+build go1.12
 
-// Driver is the current version of the driver.
-var Driver = "v0.3.0"
+package connection
+
+const tcpKeepalive = 0 // will be set by default on Go 1.12 and higher
