@@ -1,6 +1,6 @@
 module github.com/combor/k8s-mongo-labeler-sidecar
 
-go 1.16
+go 1.17
 
 require (
 	github.com/ghodss/yaml v1.0.0 // indirect
