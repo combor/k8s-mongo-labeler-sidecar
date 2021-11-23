@@ -33,6 +33,27 @@ var sliceWriterPool = sync.Pool{
 	},
 }
 
+func encodeElement(ec EncodeContext, dw bsonrw.DocumentWriter, e primitive.E) error {
+	vw, err := dw.WriteDocumentElement(e.Key)
+	if err != nil {
+		return err
+	}
+
+	if e.Value == nil {
+		return vw.WriteNull()
+	}
+	encoder, err := ec.LookupEncoder(reflect.TypeOf(e.Value))
+	if err != nil {
+		return err
+	}
+
+	err = encoder.EncodeValue(ec, vw, reflect.ValueOf(e.Value))
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
 // DefaultValueEncoders is a namespace type for the default ValueEncoders used
 // when creating a registry.
 type DefaultValueEncoders struct{}
@@ -96,14 +117,24 @@ func (dve DefaultValueEncoders) BooleanEncodeValue(ectx EncodeContext, vw bsonrw
 	return vw.WriteBoolean(val.Bool())
 }
 
+func fitsIn32Bits(i int64) bool {
+	return math.MinInt32 <= i && i <= math.MaxInt32
+}
+
 // IntEncodeValue is the ValueEncoderFunc for int types.
 func (dve DefaultValueEncoders) IntEncodeValue(ec EncodeContext, vw bsonrw.ValueWriter, val reflect.Value) error {
 	switch val.Kind() {
 	case reflect.Int8, reflect.Int16, reflect.Int32:
 		return vw.WriteInt32(int32(val.Int()))
-	case reflect.Int, reflect.Int64:
+	case reflect.Int:
 		i64 := val.Int()
-		if ec.MinSize && i64 <= math.MaxInt32 {
+		if fitsIn32Bits(i64) {
+			return vw.WriteInt32(int32(i64))
+		}
+		return vw.WriteInt64(i64)
+	case reflect.Int64:
+		i64 := val.Int()
+		if ec.MinSize && fitsIn32Bits(i64) {
 			return vw.WriteInt32(int32(i64))
 		}
 		return vw.WriteInt64(i64)
@@ -304,17 +335,7 @@ func (dve DefaultValueEncoders) ArrayEncodeValue(ec EncodeContext, vw bsonrw.Val
 
 		for idx := 0; idx < val.Len(); idx++ {
 			e := val.Index(idx).Interface().(primitive.E)
-			vw, err := dw.WriteDocumentElement(e.Key)
-			if err != nil {
-				return err
-			}
-
-			encoder, err := ec.LookupEncoder(reflect.TypeOf(e.Value))
-			if err != nil {
-				return err
-			}
-
-			err = encoder.EncodeValue(ec, vw, reflect.ValueOf(e.Value))
+			err = encodeElement(ec, dw, e)
 			if err != nil {
 				return err
 			}
@@ -367,17 +388,7 @@ func (dve DefaultValueEncoders) SliceEncodeValue(ec EncodeContext, vw bsonrw.Val
 		}
 
 		for _, e := range d {
-			vw, err := dw.WriteDocumentElement(e.Key)
-			if err != nil {
-				return err
-			}
-
-			encoder, err := ec.LookupEncoder(reflect.TypeOf(e.Value))
-			if err != nil {
-				return err
-			}
-
-			err = encoder.EncodeValue(ec, vw, reflect.ValueOf(e.Value))
+			err = encodeElement(ec, dw, e)
 			if err != nil {
 				return err
 			}

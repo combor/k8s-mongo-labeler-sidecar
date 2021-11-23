@@ -12,10 +12,6 @@
 package bson
 
 import (
-	"math"
-	"strconv"
-	"strings"
-
 	"github.com/mongodb/mongo-go-driver/bson/primitive"
 )
 
@@ -38,6 +34,9 @@ type Zeroer interface {
 // order is not important, a map is more comfortable and concise.
 type D = primitive.D
 
+// E represents a BSON element for a D. It is usually used inside a D.
+type E = primitive.E
+
 // M is an unordered, concise representation of a BSON Document. It should generally be used to
 // serialize BSON when the order of the elements of a BSON document do not matter. If the element
 // order matters, use a D instead.
@@ -59,23 +58,3 @@ type M = primitive.M
 // 		bson.A{"bar", "world", 3.14159, bson.D{{"qux", 12345}}}
 //
 type A = primitive.A
-
-func formatDouble(f float64) string {
-	var s string
-	if math.IsInf(f, 1) {
-		s = "Infinity"
-	} else if math.IsInf(f, -1) {
-		s = "-Infinity"
-	} else if math.IsNaN(f) {
-		s = "NaN"
-	} else {
-		// Print exactly one decimalType place for integers; otherwise, print as many are necessary to
-		// perfectly represent it.
-		s = strconv.FormatFloat(f, 'G', -1, 64)
-		if !strings.ContainsRune(s, '.') {
-			s += ".0"
-		}
-	}
-
-	return s
-}
