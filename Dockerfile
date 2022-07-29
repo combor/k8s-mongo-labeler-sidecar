@@ -1,4 +1,4 @@
-FROM golang:1.17.8-bullseye AS builder
+FROM golang:1.18.4-bullseye AS builder
 COPY . $GOPATH/src/github.com/combor/k8s-mongo-primary-sidecar/
 WORKDIR $GOPATH/src/github.com/combor/k8s-mongo-primary-sidecar/
 RUN CGO_ENABLED=0 go build -o /primary-sidecar
