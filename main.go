@@ -58,7 +58,7 @@ func (l *Labeler) setPrimaryLabel() error {
 	listOptions := metav1.ListOptions{
 		LabelSelector: l.Config.LabelSelector,
 	}
-	pods, err := l.K8scli.CoreV1().Pods(l.Config.Namespace).List(listOptions)
+	pods, err := l.K8scli.CoreV1().Pods(l.Config.Namespace).List(context.Background(), listOptions)
 	if err != nil {
 		return err
 	}
@@ -85,7 +85,7 @@ func (l *Labeler) setPrimaryLabel() error {
 		}
 		logrus.Debugf("Setting labels %v", labels)
 		pod.SetLabels(labels)
-		_, err := l.K8scli.CoreV1().Pods(l.Config.Namespace).Update(&pod)
+		_, err := l.K8scli.CoreV1().Pods(l.Config.Namespace).Update(context.Background(), &pod, metav1.UpdateOptions{})
 		if err != nil {
 			return err
 		}
@@ -104,11 +104,11 @@ func getConfigFromEnvironment() (*Config, error) {
 	}
 
 	config := &Config{
-		LabelSelector:	l,
-		Namespace:	"default",
-		Address:	"localhost:27017",
-		LabelAll:	false,
-		LogLevel:	logrus.InfoLevel,
+		LabelSelector: l,
+		Namespace:     "default",
+		Address:       "localhost:27017",
+		LabelAll:      false,
+		LogLevel:      logrus.InfoLevel,
 	}
 
 	if l, ok = os.LookupEnv("NAMESPACE"); ok {
