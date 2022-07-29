@@ -48,3 +48,7 @@ Example:
        - name: DEBUG
          value: "true"
 ```
+
+### Docker image
+
+https://hub.docker.com/repository/docker/combor/k8s-mongo-labeler-sidecar
