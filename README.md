@@ -6,7 +6,7 @@ You have a mongoDB replica set running as a stateful set on kubernetes and you n
 
 ## Solution
 
-Use mongo labeler sidecar that will check which pod is primary and will add `primary=true` label so you can use it in your service definition as a selectora.
+Use mongo labeler sidecar that will check which pod is primary and will add `primary=true` label so you can use it in your service definition as a selector.
 ```
 apiVersion: v1
 kind: Service
