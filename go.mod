@@ -4,7 +4,7 @@ go 1.17
 
 require (
 	github.com/mongodb/mongo-go-driver v0.3.0
-	github.com/sirupsen/logrus v1.9.0
+	github.com/sirupsen/logrus v1.9.3
 	k8s.io/apimachinery v0.27.3
 	k8s.io/client-go v0.27.1
 )
