@@ -1,6 +1,6 @@
 module github.com/combor/k8s-mongo-labeler-sidecar
 
-go 1.17
+go 1.21
 
 require (
 	github.com/mongodb/mongo-go-driver v0.3.0
