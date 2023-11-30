@@ -51,4 +51,4 @@ Example:
 
 ### Docker image
 
-https://hub.docker.com/repository/docker/combor/k8s-mongo-labeler-sidecar
+please use included Dockerfile to build your own
