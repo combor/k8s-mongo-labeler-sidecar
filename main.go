@@ -66,32 +66,30 @@ func (l *Labeler) setPrimaryLabel() error {
 	logrus.Debugf("Found %d pods", len(pods.Items))
 	for _, pod := range pods.Items {
 		name := pod.GetName()
-		labels := pod.GetLabels()
 		if name == primary {
-			if labels["primary"] != "true" {
+			if pod.Labels["primary"] != "true" {
 				logrus.Infof("Setting primary to true for pod %s", name)
 			}
-			labels["primary"] = "true"
+			pod.Labels["primary"] = "true"
 			found = true
 		} else {
 			if l.Config.LabelAll == true {
-				if labels["primary"] != "false" {
+				if pod.Labels["primary"] != "false" {
 					logrus.Infof("Setting primary to false for pod %s", name)
 				}
-				labels["primary"] = "false"
+				pod.Labels["primary"] = "false"
 			} else {
-				delete(labels, "primary")
+				delete(pod.Labels, "primary")
 			}
 		}
-		logrus.Debugf("Setting labels %v", labels)
-		pod.SetLabels(labels)
+		logrus.Debugf("Setting labels %v", pod.Labels)
 		_, err := l.K8scli.CoreV1().Pods(l.Config.Namespace).Update(context.Background(), &pod, metav1.UpdateOptions{})
 		if err != nil {
 			return err
 		}
 	}
 	if !found {
-		return fmt.Errorf("Primary not found")
+		return fmt.Errorf("primary not found")
 	}
 	return nil
 }
@@ -100,7 +98,7 @@ func getConfigFromEnvironment() (*Config, error) {
 	var l string
 	var ok bool
 	if l, ok = os.LookupEnv("LABEL_SELECTOR"); !ok {
-		return nil, fmt.Errorf("Please export LABEL_SELECTOR")
+		return nil, fmt.Errorf("please export LABEL_SELECTOR")
 	}
 
 	config := &Config{
@@ -168,7 +166,12 @@ func (l *Labeler) getMongoPrimary() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer c.Close()
+	defer func(c connection.Connection) {
+		err := c.Close()
+		if err != nil {
+			_ = fmt.Errorf("not posiblie to close connection")
+		}
+	}(c)
 
 	isMaster, err := (&command.IsMaster{}).Encode()
 	err = c.WriteWireMessage(ctx, isMaster)
@@ -184,7 +187,7 @@ func (l *Labeler) getMongoPrimary() (string, error) {
 	var hosts bsonx.Arr
 	var ok bool
 	if hosts, ok = doc.Lookup("hosts").ArrayOK(); !ok {
-		return "", fmt.Errorf("No hosts found for replica")
+		return "", fmt.Errorf("no hosts found for replica")
 	}
 	logrus.Debugf("Hosts %s", hosts)
 	if primaryHost, ok := doc.Lookup("primary").StringValueOK(); ok {
@@ -193,7 +196,7 @@ func (l *Labeler) getMongoPrimary() (string, error) {
 			return primary, nil
 		}
 	}
-	return "", fmt.Errorf("Can't find primary server")
+	return "", fmt.Errorf("can't find primary server")
 }
 
 func main() {
