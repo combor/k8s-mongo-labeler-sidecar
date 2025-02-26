@@ -73,7 +73,7 @@ func (l *Labeler) setPrimaryLabel() error {
 			pod.Labels["primary"] = "true"
 			found = true
 		} else {
-			if l.Config.LabelAll == true {
+			if l.Config.LabelAll {
 				if pod.Labels["primary"] != "false" {
 					logrus.Infof("Setting primary to false for pod %s", name)
 				}
@@ -160,8 +160,7 @@ func homeDir() string {
 func (l *Labeler) getMongoPrimary() (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
-	var addr address.Address
-	addr = address.Address(l.Config.Address)
+	addr := address.Address(l.Config.Address)
 	c, _, err := connection.New(ctx, addr)
 	if err != nil {
 		return "", err
@@ -174,6 +173,9 @@ func (l *Labeler) getMongoPrimary() (string, error) {
 	}(c)
 
 	isMaster, err := (&command.IsMaster{}).Encode()
+	if err != nil {
+		return "", err
+	}
 	err = c.WriteWireMessage(ctx, isMaster)
 	if err != nil {
 		return "", err
@@ -184,6 +186,9 @@ func (l *Labeler) getMongoPrimary() (string, error) {
 	}
 	reply := wm.(wiremessage.Reply)
 	doc, err := reply.GetMainDocument()
+	if err != nil {
+		return "", err
+	}
 	var hosts bsonx.Arr
 	var ok bool
 	if hosts, ok = doc.Lookup("hosts").ArrayOK(); !ok {
