@@ -186,6 +186,9 @@ func (l *Labeler) getMongoPrimary() (string, error) {
 	}
 	reply := wm.(wiremessage.Reply)
 	doc, err := reply.GetMainDocument()
+	if err != nil {
+		return "", err
+	}
 	var hosts bsonx.Arr
 	var ok bool
 	if hosts, ok = doc.Lookup("hosts").ArrayOK(); !ok {
