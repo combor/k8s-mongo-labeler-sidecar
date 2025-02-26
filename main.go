@@ -73,7 +73,7 @@ func (l *Labeler) setPrimaryLabel() error {
 			pod.Labels["primary"] = "true"
 			found = true
 		} else {
-			if l.Config.LabelAll == true {
+			if l.Config.LabelAll {
 				if pod.Labels["primary"] != "false" {
 					logrus.Infof("Setting primary to false for pod %s", name)
 				}
