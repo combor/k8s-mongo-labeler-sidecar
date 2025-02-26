@@ -160,8 +160,7 @@ func homeDir() string {
 func (l *Labeler) getMongoPrimary() (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
-	var addr address.Address
-	addr = address.Address(l.Config.Address)
+	addr := address.Address(l.Config.Address)
 	c, _, err := connection.New(ctx, addr)
 	if err != nil {
 		return "", err
