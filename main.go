@@ -173,6 +173,9 @@ func (l *Labeler) getMongoPrimary() (string, error) {
 	}(c)
 
 	isMaster, err := (&command.IsMaster{}).Encode()
+	if err != nil {
+		return "", err
+	}
 	err = c.WriteWireMessage(ctx, isMaster)
 	if err != nil {
 		return "", err
