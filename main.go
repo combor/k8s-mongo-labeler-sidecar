@@ -212,11 +212,12 @@ func main() {
 	logrus.SetLevel(labeler.Config.LogLevel)
 	logrus.Infof("Setting logging level to %s", labeler.Config.LogLevel.String())
 
-	ticker := time.NewTicker(5 * time.Second).C
+	ticker := time.NewTicker(5 * time.Second)
+	tickCh := ticker.C
 	done := make(chan bool)
 	for {
 		select {
-		case <-ticker:
+		case <-tickCh:
 			err := labeler.setPrimaryLabel()
 			if err != nil {
 				logrus.Error(err)
@@ -226,5 +227,4 @@ func main() {
 			return
 		}
 	}
-
 }
