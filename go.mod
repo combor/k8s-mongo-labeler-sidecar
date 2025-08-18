@@ -8,7 +8,7 @@ require (
 	github.com/mongodb/mongo-go-driver v0.3.0
 	github.com/sirupsen/logrus v1.9.3
 	github.com/stretchr/testify v1.10.0
-	k8s.io/apimachinery v0.33.3
+	k8s.io/apimachinery v0.33.4
 	k8s.io/client-go v0.33.1
 )
 
