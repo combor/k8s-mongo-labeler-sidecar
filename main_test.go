@@ -62,13 +62,17 @@ func TestGetConfigFromEnvironment(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			var err error
 			for k, v := range tt.env {
-				os.Setenv(k, v)
+				err = os.Setenv(k, v)
 			}
+			assert.NoError(t, err)
 			defer func() {
+				var err error
 				for k := range tt.env {
-					os.Unsetenv(k)
+					err = os.Unsetenv(k)
 				}
+				assert.NoError(t, err)
 			}()
 
 			config, err := getConfigFromEnvironment()
