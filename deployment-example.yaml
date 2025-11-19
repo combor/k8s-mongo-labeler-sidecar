@@ -1,0 +1,96 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mongo
+spec:
+  serviceName: "mongo"
+  replicas: 3
+  selector:
+    matchLabels:
+      role: mongo
+  template:
+    metadata:
+      labels:
+        role: mongo
+    spec:
+      serviceAccountName: mongo-labeler
+      # Seccomp profile configuration
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+      - name: mongo
+        image: mongo:latest
+        ports:
+        - containerPort: 27017
+        command:
+        - mongod
+        - "--replSet"
+        - "rs0"
+        - "--bind_ip_all"
+        volumeMounts:
+        - name: mongo-persistent-storage
+          mountPath: /data/db
+      # Mongo labeler sidecar
+      - name: labeler
+        image: your-registry/k8s-mongo-labeler-sidecar:latest
+        env:
+        - name: LABEL_SELECTOR
+          value: "role=mongo"
+        - name: NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        - name: MONGO_ADDRESS
+          value: "localhost:27017"
+        - name: LABEL_ALL
+          value: "true"
+        - name: DEBUG
+          value: "false"
+        # Security context for the sidecar
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 65532
+          runAsGroup: 65532
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+          seccompProfile:
+            type: RuntimeDefault
+  volumeClaimTemplates:
+  - metadata:
+      name: mongo-persistent-storage
+    spec:
+      accessModes: [ "ReadWriteOnce" ]
+      resources:
+        requests:
+          storage: 10Gi
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: mongo-labeler
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: mongo-labeler
+rules:
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["get", "list", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: mongo-labeler
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: mongo-labeler
+subjects:
+- kind: ServiceAccount
+  name: mongo-labeler
+
