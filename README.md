@@ -52,3 +52,18 @@ Example:
 ### Docker image
 
 please use included Dockerfile to build your own
+
+## Deployment
+
+See `deployment-example.yaml` for a complete example of how to deploy MongoDB with the labeler sidecar.
+
+### Important notes
+
+1. **Label Updates**: The labeler uses `Patch` instead of `Update` to modify pod labels, which prevents conflicts with other controllers and is more efficient.
+
+2. **Security**: The container image uses distroless base image and runs as non-root user (UID 65532). The deployment example includes proper seccomp profile configuration (`RuntimeDefault`) to ensure compatibility with modern Kubernetes security policies.
+
+3. **RBAC**: The sidecar requires the following permissions:
+   - `get`, `list`, `patch` on pods in the target namespace
+
+4. **Seccomp Profile**: The deployment example includes `seccompProfile.type: RuntimeDefault` which is required for Kubernetes 1.19+ with PodSecurityPolicy/PodSecurity standards enabled.

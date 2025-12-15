@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
@@ -16,6 +17,7 @@ import (
 	"github.com/mongodb/mongo-go-driver/x/network/wiremessage"
 	"github.com/sirupsen/logrus"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
@@ -66,24 +68,57 @@ func (l *Labeler) setPrimaryLabel() error {
 	logrus.Debugf("Found %d pods", len(pods.Items))
 	for _, pod := range pods.Items {
 		name := pod.GetName()
+		var patchData map[string]interface{}
+		
 		if name == primary {
 			if pod.Labels["primary"] != "true" {
 				logrus.Infof("Setting primary to true for pod %s", name)
 			}
-			pod.Labels["primary"] = "true"
+			patchData = map[string]interface{}{
+				"metadata": map[string]interface{}{
+					"labels": map[string]string{
+						"primary": "true",
+					},
+				},
+			}
 			found = true
 		} else {
 			if l.Config.LabelAll {
 				if pod.Labels["primary"] != "false" {
 					logrus.Infof("Setting primary to false for pod %s", name)
 				}
-				pod.Labels["primary"] = "false"
+				patchData = map[string]interface{}{
+					"metadata": map[string]interface{}{
+						"labels": map[string]string{
+							"primary": "false",
+						},
+					},
+				}
 			} else {
-				delete(pod.Labels, "primary")
+				// To remove a label, set it to null in strategic merge patch
+				patchData = map[string]interface{}{
+					"metadata": map[string]interface{}{
+						"labels": map[string]interface{}{
+							"primary": nil,
+						},
+					},
+				}
 			}
 		}
-		logrus.Debugf("Setting labels %v", pod.Labels)
-		_, err := l.K8scli.CoreV1().Pods(l.Config.Namespace).Update(context.Background(), &pod, metav1.UpdateOptions{})
+		
+		patchBytes, err := json.Marshal(patchData)
+		if err != nil {
+			return err
+		}
+		
+		logrus.Debugf("Patching pod %s with: %s", name, string(patchBytes))
+		_, err = l.K8scli.CoreV1().Pods(l.Config.Namespace).Patch(
+			context.Background(),
+			name,
+			types.StrategicMergePatchType,
+			patchBytes,
+			metav1.PatchOptions{},
+		)
 		if err != nil {
 			return err
 		}
