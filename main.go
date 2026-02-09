@@ -11,12 +11,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mongodb/mongo-go-driver/x/bsonx"
-	"github.com/mongodb/mongo-go-driver/x/network/address"
-	"github.com/mongodb/mongo-go-driver/x/network/command"
-	"github.com/mongodb/mongo-go-driver/x/network/connection"
-	"github.com/mongodb/mongo-go-driver/x/network/wiremessage"
 	"github.com/sirupsen/logrus"
+	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
@@ -206,46 +204,58 @@ func homeDir() string {
 func (l *Labeler) getMongoPrimary() (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
-	addr := address.Address(l.Config.Address)
-	c, _, err := connection.New(ctx, addr)
-	if err != nil {
-		return "", err
-	}
-	defer func(c connection.Connection) {
-		err := c.Close()
-		if err != nil {
-			_ = fmt.Errorf("not posiblie to close connection")
-		}
-	}(c)
 
-	isMaster, err := (&command.IsMaster{}).Encode()
+	clientOptions := options.Client().
+		ApplyURI(fmt.Sprintf("mongodb://%s", l.Config.Address)).
+		SetDirect(true)
+	client, err := mongo.Connect(clientOptions)
 	if err != nil {
 		return "", err
 	}
-	err = c.WriteWireMessage(ctx, isMaster)
+	defer func() {
+		err := client.Disconnect(ctx)
+		if err != nil {
+			logrus.Debugf("unable to close mongo connection: %v", err)
+		}
+	}()
+	if err = client.Ping(ctx, nil); err != nil {
+		return "", err
+	}
+
+	var hello bson.M
+	err = client.Database("admin").
+		RunCommand(ctx, bson.D{{Key: "hello", Value: 1}}).
+		Decode(&hello)
 	if err != nil {
 		return "", err
 	}
-	wm, err := c.ReadWireMessage(ctx)
-	if err != nil {
-		return "", err
-	}
-	reply := wm.(wiremessage.Reply)
-	doc, err := reply.GetMainDocument()
-	if err != nil {
-		return "", err
-	}
-	var hosts bsonx.Arr
-	var ok bool
-	if hosts, ok = doc.Lookup("hosts").ArrayOK(); !ok {
+
+	hostsValue, ok := hello["hosts"]
+	if !ok {
 		return "", fmt.Errorf("no hosts found for replica")
 	}
-	logrus.Debugf("Hosts %s", hosts)
-	if primaryHost, ok := doc.Lookup("primary").StringValueOK(); ok {
-		primary := strings.Split(primaryHost, ".")[0]
-		if len(primary) != 0 {
-			return primary, nil
+
+	hosts, ok := hostsValue.(bson.A)
+	if !ok {
+		return "", fmt.Errorf("invalid hosts type %T", hostsValue)
+	}
+	logrus.Debugf("Hosts %v", hosts)
+
+	primaryHost, _ := hello["primary"].(string)
+	if primaryHost == "" {
+		if isWritablePrimary, ok := hello["isWritablePrimary"].(bool); ok && isWritablePrimary {
+			primaryHost, _ = hello["me"].(string)
 		}
+	}
+	if primaryHost == "" {
+		// Older MongoDB versions may expose "ismaster" instead of "isWritablePrimary".
+		if isMaster, ok := hello["ismaster"].(bool); ok && isMaster {
+			primaryHost, _ = hello["me"].(string)
+		}
+	}
+	primary := strings.Split(primaryHost, ".")[0]
+	if len(primary) != 0 {
+		return primary, nil
 	}
 	return "", fmt.Errorf("can't find primary server")
 }
