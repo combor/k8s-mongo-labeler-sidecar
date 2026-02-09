@@ -52,11 +52,15 @@ Environment variables:
 
 ## Published image
 
-Container images are built and published by GitHub Actions to GitHub Container Registry (GHCR):
+Container images are published to GHCR at:
 
-- `ghcr.io/<owner>/<repo>`
-- multi-arch tags (for example branch/tag/sha and `latest` on default branch)
-- architecture tags (for example `*-amd64`, `*-arm64`)
+`ghcr.io/combor/k8s-mongo-labeler-sidecar`
+
+
+```bash
+docker pull ghcr.io/combor/k8s-mongo-labeler-sidecar:latest-amd64
+docker pull ghcr.io/combor/k8s-mongo-labeler-sidecar:latest-arm64
+```
 
 ## Deployment
 
