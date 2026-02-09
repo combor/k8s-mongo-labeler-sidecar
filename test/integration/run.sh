@@ -8,6 +8,7 @@ LABELER_IMAGE="${LABELER_IMAGE:-mongo-labeler-it:local}"
 KEEP_CLUSTER="${KEEP_CLUSTER:-false}"
 TIMEOUT="${TIMEOUT:-240s}"
 DOCKER_CONFIG_TMP=""
+STACK_TMP=""
 
 prepare_docker_config() {
   if [[ -n "${DOCKER_CONFIG:-}" ]]; then
@@ -36,6 +37,9 @@ prepare_docker_host() {
 }
 
 cleanup() {
+  if [[ -n "${STACK_TMP}" ]]; then
+    rm -f "${STACK_TMP}"
+  fi
   if [[ -n "${DOCKER_CONFIG_TMP}" ]]; then
     rm -rf "${DOCKER_CONFIG_TMP}"
   fi
@@ -51,6 +55,14 @@ prepare_docker_config
 prepare_docker_host
 export DOCKER_BUILDKIT=1
 
+if ! [[ "${NAMESPACE}" =~ ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$ ]]; then
+  echo "Invalid NAMESPACE value: ${NAMESPACE}"
+  exit 1
+fi
+
+STACK_TMP="$(mktemp)"
+sed "s/mongo-it/${NAMESPACE}/g" "${ROOT_DIR}/test/integration/stack.yaml" >"${STACK_TMP}"
+
 echo "Creating kind cluster '${CLUSTER_NAME}'..."
 kind delete cluster --name "${CLUSTER_NAME}" >/dev/null 2>&1 || true
 kind create cluster --name "${CLUSTER_NAME}"
@@ -59,8 +71,8 @@ echo "Building labeler image '${LABELER_IMAGE}'..."
 docker build -t "${LABELER_IMAGE}" "${ROOT_DIR}"
 kind load docker-image --name "${CLUSTER_NAME}" "${LABELER_IMAGE}"
 
-echo "Deploying integration stack..."
-kubectl apply -f "${ROOT_DIR}/test/integration/stack.yaml"
+echo "Deploying integration stack into namespace '${NAMESPACE}'..."
+kubectl apply -f "${STACK_TMP}"
 kubectl -n "${NAMESPACE}" rollout status statefulset/mongo --timeout="${TIMEOUT}"
 
 echo "Waiting for primary label on mongo-0..."
