@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -69,7 +70,7 @@ func (l *Labeler) setPrimaryLabel() error {
 	for _, pod := range pods.Items {
 		name := pod.GetName()
 		var patchData map[string]interface{}
-		
+
 		if name == primary {
 			if pod.Labels["primary"] != "true" {
 				logrus.Infof("Setting primary to true for pod %s", name)
@@ -105,12 +106,12 @@ func (l *Labeler) setPrimaryLabel() error {
 				}
 			}
 		}
-		
+
 		patchBytes, err := json.Marshal(patchData)
 		if err != nil {
 			return err
 		}
-		
+
 		logrus.Debugf("Patching pod %s with: %s", name, string(patchBytes))
 		_, err = l.K8scli.CoreV1().Pods(l.Config.Namespace).Patch(
 			context.Background(),
@@ -150,11 +151,21 @@ func getConfigFromEnvironment() (*Config, error) {
 	if l, ok = os.LookupEnv("MONGO_ADDRESS"); ok {
 		config.Address = l
 	}
-	if _, ok = os.LookupEnv("LABEL_ALL"); ok {
-		config.LabelAll = true
+	if l, ok = os.LookupEnv("LABEL_ALL"); ok {
+		parsed, err := strconv.ParseBool(l)
+		if err != nil {
+			return nil, fmt.Errorf("invalid LABEL_ALL value %q: %w", l, err)
+		}
+		config.LabelAll = parsed
 	}
-	if _, ok = os.LookupEnv("DEBUG"); ok {
-		config.LogLevel = logrus.DebugLevel
+	if l, ok = os.LookupEnv("DEBUG"); ok {
+		parsed, err := strconv.ParseBool(l)
+		if err != nil {
+			return nil, fmt.Errorf("invalid DEBUG value %q: %w", l, err)
+		}
+		if parsed {
+			config.LogLevel = logrus.DebugLevel
+		}
 	}
 	return config, nil
 }
