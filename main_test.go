@@ -8,12 +8,48 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+type envState struct {
+	Value string
+	Set   bool
+}
+
+func setConfigEnv(t *testing.T, env map[string]string) {
+	t.Helper()
+
+	keys := []string{"LABEL_SELECTOR", "NAMESPACE", "MONGO_ADDRESS", "LABEL_ALL", "DEBUG"}
+	original := make(map[string]envState, len(keys))
+	for _, key := range keys {
+		value, ok := os.LookupEnv(key)
+		original[key] = envState{Value: value, Set: ok}
+		if err := os.Unsetenv(key); err != nil {
+			t.Fatalf("failed to unset %s: %v", key, err)
+		}
+	}
+	for key, value := range env {
+		if err := os.Setenv(key, value); err != nil {
+			t.Fatalf("failed to set %s: %v", key, err)
+		}
+	}
+	t.Cleanup(func() {
+		for _, key := range keys {
+			state := original[key]
+			var err error
+			if state.Set {
+				err = os.Setenv(key, state.Value)
+			} else {
+				err = os.Unsetenv(key)
+			}
+			assert.NoError(t, err)
+		}
+	})
+}
+
 func TestGetConfigFromEnvironment(t *testing.T) {
 	tests := []struct {
-		name           string
-		env            map[string]string
-		expectedConfig *Config
-		expectedError  string
+		name                  string
+		env                   map[string]string
+		expectedConfig        *Config
+		expectedErrorContains string
 	}{
 		{
 			name: "all environment variables set",
@@ -31,7 +67,7 @@ func TestGetConfigFromEnvironment(t *testing.T) {
 				LabelAll:      true,
 				LogLevel:      logrus.DebugLevel,
 			},
-			expectedError: "",
+			expectedErrorContains: "",
 		},
 		{
 			name: "missing LABEL_SELECTOR",
@@ -41,8 +77,8 @@ func TestGetConfigFromEnvironment(t *testing.T) {
 				"LABEL_ALL":     "true",
 				"DEBUG":         "true",
 			},
-			expectedConfig: nil,
-			expectedError:  "please export LABEL_SELECTOR",
+			expectedConfig:        nil,
+			expectedErrorContains: "please export LABEL_SELECTOR",
 		},
 		{
 			name: "default values",
@@ -56,28 +92,51 @@ func TestGetConfigFromEnvironment(t *testing.T) {
 				LabelAll:      false,
 				LogLevel:      logrus.InfoLevel,
 			},
-			expectedError: "",
+			expectedErrorContains: "",
+		},
+		{
+			name: "boolean false values are respected",
+			env: map[string]string{
+				"LABEL_SELECTOR": "app=mongo",
+				"LABEL_ALL":      "false",
+				"DEBUG":          "false",
+			},
+			expectedConfig: &Config{
+				LabelSelector: "app=mongo",
+				Namespace:     "default",
+				Address:       "localhost:27017",
+				LabelAll:      false,
+				LogLevel:      logrus.InfoLevel,
+			},
+			expectedErrorContains: "",
+		},
+		{
+			name: "invalid DEBUG value",
+			env: map[string]string{
+				"LABEL_SELECTOR": "app=mongo",
+				"DEBUG":          "not-a-bool",
+			},
+			expectedConfig:        nil,
+			expectedErrorContains: "invalid DEBUG value",
+		},
+		{
+			name: "invalid LABEL_ALL value",
+			env: map[string]string{
+				"LABEL_SELECTOR": "app=mongo",
+				"LABEL_ALL":      "not-a-bool",
+			},
+			expectedConfig:        nil,
+			expectedErrorContains: "invalid LABEL_ALL value",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			var err error
-			for k, v := range tt.env {
-				err = os.Setenv(k, v)
-			}
-			assert.NoError(t, err)
-			defer func() {
-				var err error
-				for k := range tt.env {
-					err = os.Unsetenv(k)
-				}
-				assert.NoError(t, err)
-			}()
+			setConfigEnv(t, tt.env)
 
 			config, err := getConfigFromEnvironment()
-			if tt.expectedError != "" {
-				assert.EqualError(t, err, tt.expectedError)
+			if tt.expectedErrorContains != "" {
+				assert.ErrorContains(t, err, tt.expectedErrorContains)
 			} else {
 				assert.NoError(t, err)
 				assert.Equal(t, tt.expectedConfig, config)
