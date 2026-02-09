@@ -1,19 +1,28 @@
-# kuberentes mongoDB replica set pod labeler
+# Kubernetes MongoDB Primary Pod Labeler
 
-## The problem
+This sidecar detects the current MongoDB replica set primary and labels Kubernetes pods so services can target the writable node.
 
-You have a mongoDB replica set running as a stateful set on kubernetes and you need to expose it as an external service. If you use `loadbalancer` service it will select one of the mongo pods randomly so you can be redirected to a secondary node which is read only.
+## How it works
 
-## Solution
+Every 5 seconds the sidecar:
 
-Use mongo labeler sidecar that will check which pod is primary and will add `primary=true` label so you can use it in your service definition as a selector.
-```
+1. Connects to MongoDB (`MONGO_ADDRESS`, default `localhost:27017`).
+2. Detects the primary pod name.
+3. Lists pods in `NAMESPACE` matching `LABEL_SELECTOR`.
+4. Patches labels:
+   - primary pod: `primary=true`
+   - other pods: `primary=false` when `LABEL_ALL=true`
+   - other pods: removes `primary` label when `LABEL_ALL=false`
+
+It uses Kubernetes `Patch` (strategic merge), not full-object `Update`.
+
+## Service selector example
+
+```yaml
 apiVersion: v1
 kind: Service
 metadata:
   name: mongo-external
-  labels:
-    name: mongo
 spec:
   type: LoadBalancer
   ports:
@@ -26,63 +35,55 @@ spec:
 
 ## Configuration
 
-Pod labeler will aultomatically detect kubernetes config wile running inside the cluster but if you want to test it outside it assumes that your k8s config is stored in `~/.kube/config` and mongo runs on `localhost:27017`
+When running inside Kubernetes, in-cluster config is used automatically.  
+When running outside a cluster, kubeconfig defaults to `~/.kube/config` and can be overridden with `--kubeconfig`.
 
-You can use `kubectl port-forward mongo-0 27017` command for testing purposes.
+Environment variables:
 
-### ENV
+| Variable | Required | Default | Description |
+| --- | --- | --- | --- |
+| `LABEL_SELECTOR` | yes | none | Pod label selector (for example `role=mongo`). |
+| `NAMESPACE` | no | `default` | Namespace where pods are listed and patched. |
+| `MONGO_ADDRESS` | no | `localhost:27017` | MongoDB endpoint used for primary detection. |
+| `LABEL_ALL` | no | `false` | Boolean. If `true`, non-primary pods get `primary=false`; if `false`, the label is removed. |
+| `DEBUG` | no | `false` | Boolean. If `true`, enables debug logging. |
 
-```
-LABEL_SELECTOR - labels that describe your mongo deployment
-NAMESPACE - restricts where to look for mongo pods
-DEBUG - when set to true increases log verbosity
-```
+`LABEL_ALL` and `DEBUG` are parsed as booleans. Invalid values fail startup.
 
-Example:
-```
-     env:
-       - name: LABEL_SELECTOR
-         value: "role=mongo,environment=dev"
-       - name: NAMESPACE
-         value: "dev"
-       - name: DEBUG
-         value: "true"
-```
+## Published image
 
-### Docker image
+Container images are built and published by GitHub Actions to GitHub Container Registry (GHCR):
 
-please use included Dockerfile to build your own
+- `ghcr.io/<owner>/<repo>`
+- multi-arch tags (for example branch/tag/sha and `latest` on default branch)
+- architecture tags (for example `*-amd64`, `*-arm64`)
 
 ## Deployment
 
-See `deployment-example.yaml` for a complete example of how to deploy MongoDB with the labeler sidecar.
-
-### Important notes
-
-1. **Label Updates**: The labeler uses `Patch` instead of `Update` to modify pod labels, which prevents conflicts with other controllers and is more efficient.
-
-2. **Security**: The container image uses distroless base image and runs as non-root user (UID 65532). The deployment example includes proper seccomp profile configuration (`RuntimeDefault`) to ensure compatibility with modern Kubernetes security policies.
-
-3. **RBAC**: The sidecar requires the following permissions:
-   - `get`, `list`, `patch` on pods in the target namespace
-
-4. **Seccomp Profile**: The deployment example includes `seccompProfile.type: RuntimeDefault` which is required for Kubernetes 1.19+ with PodSecurityPolicy/PodSecurity standards enabled.
+`deployment-example.yaml` can be used as an example deployment manifest.
 
 ## Integration test (kind)
 
-The repository includes a tiny end-to-end integration environment that runs:
-- a 1-pod MongoDB replica set (`StatefulSet`)
-- this labeler as a sidecar in the same pod
-- minimal RBAC for pod patching
+The repository includes an end-to-end test environment in `test/integration`.
+
+Prerequisites:
+
+- `kind`
+- `kubectl`
+- Docker with BuildKit/Buildx enabled
 
 Run:
-```
+
+```bash
 ./test/integration/run.sh
 ```
 
-The script creates a disposable `kind` cluster, builds and loads the local image, deploys `test/integration/stack.yaml`, and verifies that pod `mongo-0` gets label `primary=true`.
+Optional overrides:
 
-Set `KEEP_CLUSTER=true` to keep the cluster for debugging:
-```
-KEEP_CLUSTER=true ./test/integration/run.sh
-```
+- `NAMESPACE` (default `mongo-it`)
+- `CLUSTER_NAME` (default `mongo-labeler-it`)
+- `LABELER_IMAGE` (default `mongo-labeler-it:local`)
+- `TIMEOUT` (default `240s`)
+- `KEEP_CLUSTER=true` (keep cluster for debugging)
+
+The script creates a temporary kind cluster, deploys Mongo + sidecar, and verifies that `mongo-0` receives `primary=true`.
