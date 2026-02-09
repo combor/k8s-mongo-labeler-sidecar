@@ -1,3 +1,80 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: mongo-labeler
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: mongo-labeler
+rules:
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["get", "list", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: mongo-labeler
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: mongo-labeler
+subjects:
+- kind: ServiceAccount
+  name: mongo-labeler
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mongo-bootstrap
+data:
+  start-mongo.sh: |
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    mongod \
+      --replSet rs0 \
+      --bind_ip_all \
+      --port 27017 \
+      --dbpath /data/db \
+      --logpath /proc/1/fd/1 \
+      --logappend &
+    mongod_pid="$!"
+
+    if [[ "${HOSTNAME}" == "mongo-0" ]]; then
+      for host in mongo-0.mongo mongo-1.mongo mongo-2.mongo; do
+        until mongosh --quiet --host "${host}" --eval "db.adminCommand({ ping: 1 }).ok" >/dev/null 2>&1; do
+          sleep 1
+        done
+      done
+
+      if ! mongosh --quiet --eval "rs.status().ok" >/dev/null 2>&1; then
+        mongosh --quiet --eval "rs.initiate({
+          _id: 'rs0',
+          members: [
+            {_id: 0, host: 'mongo-0.mongo:27017'},
+            {_id: 1, host: 'mongo-1.mongo:27017'},
+            {_id: 2, host: 'mongo-2.mongo:27017'}
+          ]
+        })"
+      fi
+    fi
+
+    wait "${mongod_pid}"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mongo
+spec:
+  clusterIP: None
+  selector:
+    role: mongo
+  ports:
+  - name: mongo
+    port: 27017
+---
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
@@ -20,17 +97,16 @@ spec:
           type: RuntimeDefault
       containers:
       - name: mongo
-        image: mongo:latest
+        image: mongo:7.0
+        command: ["/bin/bash", "/scripts/start-mongo.sh"]
         ports:
         - containerPort: 27017
-        command:
-        - mongod
-        - "--replSet"
-        - "rs0"
-        - "--bind_ip_all"
         volumeMounts:
         - name: mongo-persistent-storage
           mountPath: /data/db
+        - name: mongo-bootstrap
+          mountPath: /scripts
+          readOnly: true
       # Mongo labeler sidecar
       - name: labeler
         image: your-registry/k8s-mongo-labeler-sidecar:latest
@@ -59,6 +135,11 @@ spec:
             - ALL
           seccompProfile:
             type: RuntimeDefault
+      volumes:
+      - name: mongo-bootstrap
+        configMap:
+          name: mongo-bootstrap
+          defaultMode: 0755
   volumeClaimTemplates:
   - metadata:
       name: mongo-persistent-storage
@@ -67,30 +148,3 @@ spec:
       resources:
         requests:
           storage: 10Gi
----
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: mongo-labeler
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: Role
-metadata:
-  name: mongo-labeler
-rules:
-- apiGroups: [""]
-  resources: ["pods"]
-  verbs: ["get", "list", "patch"]
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
-metadata:
-  name: mongo-labeler
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: Role
-  name: mongo-labeler
-subjects:
-- kind: ServiceAccount
-  name: mongo-labeler
-
