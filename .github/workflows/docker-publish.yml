@@ -45,6 +45,16 @@ jobs:
           type=ref,event=tag
           type=sha,prefix=sha-
           type=raw,value=latest,enable={{is_default_branch}}
+          type=ref,event=branch,suffix=-amd64
+          type=ref,event=tag,suffix=-amd64
+          type=sha,prefix=sha-,suffix=-amd64
+          type=raw,value=latest-amd64,enable={{is_default_branch}}
+          type=ref,event=branch,suffix=-arm64
+          type=ref,event=tag,suffix=-arm64
+          type=sha,prefix=sha-,suffix=-arm64
+          type=raw,value=latest-arm64,enable={{is_default_branch}}
+        annotations: |
+          org.opencontainers.image.description=Kubernetes sidecar that detects MongoDB replica set primary and labels the pod with primary=true for service selection.
 
     - name: Build and push Docker image
       uses: docker/build-push-action@v6
@@ -54,4 +64,7 @@ jobs:
         platforms: linux/amd64,linux/arm64
         push: true
         tags: ${{ steps.meta.outputs.tags }}
-        labels: ${{ steps.meta.outputs.labels }}
+        labels: |
+          org.opencontainers.image.source=https://github.com/${{ github.repository }}
+          org.opencontainers.image.revision=${{ github.sha }}
+        annotations: ${{ steps.meta.outputs.annotations }}
