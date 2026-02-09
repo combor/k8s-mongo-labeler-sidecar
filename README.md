@@ -67,3 +67,22 @@ See `deployment-example.yaml` for a complete example of how to deploy MongoDB wi
    - `get`, `list`, `patch` on pods in the target namespace
 
 4. **Seccomp Profile**: The deployment example includes `seccompProfile.type: RuntimeDefault` which is required for Kubernetes 1.19+ with PodSecurityPolicy/PodSecurity standards enabled.
+
+## Integration test (kind)
+
+The repository includes a tiny end-to-end integration environment that runs:
+- a 1-pod MongoDB replica set (`StatefulSet`)
+- this labeler as a sidecar in the same pod
+- minimal RBAC for pod patching
+
+Run:
+```
+./test/integration/run.sh
+```
+
+The script creates a disposable `kind` cluster, builds and loads the local image, deploys `test/integration/stack.yaml`, and verifies that pod `mongo-0` gets label `primary=true`.
+
+Set `KEEP_CLUSTER=true` to keep the cluster for debugging:
+```
+KEEP_CLUSTER=true ./test/integration/run.sh
+```

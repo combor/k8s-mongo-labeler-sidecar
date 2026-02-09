@@ -1,0 +1,130 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: mongo-it
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: mongo-labeler
+  namespace: mongo-it
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: mongo-labeler
+  namespace: mongo-it
+rules:
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["get", "list", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: mongo-labeler
+  namespace: mongo-it
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: mongo-labeler
+subjects:
+- kind: ServiceAccount
+  name: mongo-labeler
+  namespace: mongo-it
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mongo-bootstrap
+  namespace: mongo-it
+data:
+  start-mongo.sh: |
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    mongod \
+      --replSet rs0 \
+      --bind_ip_all \
+      --port 27017 \
+      --dbpath /data/db \
+      --logpath /proc/1/fd/1 \
+      --logappend &
+    mongod_pid="$!"
+
+    until mongosh --quiet --eval "db.adminCommand({ ping: 1 }).ok" >/dev/null 2>&1; do
+      sleep 1
+    done
+
+    if ! mongosh --quiet --eval "rs.status().ok" >/dev/null 2>&1; then
+      mongosh --quiet --eval "rs.initiate({_id: 'rs0', members: [{_id: 0, host: 'mongo-0.mongo:27017'}]})"
+    fi
+
+    wait "$mongod_pid"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mongo
+  namespace: mongo-it
+spec:
+  clusterIP: None
+  selector:
+    app: mongo
+  ports:
+  - name: mongo
+    port: 27017
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mongo
+  namespace: mongo-it
+spec:
+  serviceName: mongo
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mongo
+      role: mongo
+  template:
+    metadata:
+      labels:
+        app: mongo
+        role: mongo
+    spec:
+      serviceAccountName: mongo-labeler
+      containers:
+      - name: mongo
+        image: mongo:7.0
+        command: ["/bin/bash", "/scripts/start-mongo.sh"]
+        ports:
+        - containerPort: 27017
+        volumeMounts:
+        - name: data
+          mountPath: /data/db
+        - name: scripts
+          mountPath: /scripts
+          readOnly: true
+      - name: labeler
+        image: mongo-labeler-it:local
+        env:
+        - name: LABEL_SELECTOR
+          value: "role=mongo"
+        - name: NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        - name: MONGO_ADDRESS
+          value: "localhost:27017"
+        - name: LABEL_ALL
+          value: "true"
+        - name: DEBUG
+          value: "true"
+      volumes:
+      - name: data
+        emptyDir: {}
+      - name: scripts
+        configMap:
+          name: mongo-bootstrap
+          defaultMode: 0755
