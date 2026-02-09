@@ -45,6 +45,14 @@ jobs:
           type=ref,event=tag
           type=sha,prefix=sha-
           type=raw,value=latest,enable={{is_default_branch}}
+          type=ref,event=branch,suffix=-amd64
+          type=ref,event=tag,suffix=-amd64
+          type=sha,prefix=sha-,suffix=-amd64
+          type=raw,value=latest-amd64,enable={{is_default_branch}}
+          type=ref,event=branch,suffix=-arm64
+          type=ref,event=tag,suffix=-arm64
+          type=sha,prefix=sha-,suffix=-arm64
+          type=raw,value=latest-arm64,enable={{is_default_branch}}
         annotations: |
           org.opencontainers.image.description=Kubernetes sidecar that detects MongoDB replica set primary and labels the pod with primary=true for service selection.
 
