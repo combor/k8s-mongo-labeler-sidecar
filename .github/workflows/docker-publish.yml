@@ -41,6 +41,7 @@ jobs:
     if: github.event_name == 'push' && github.ref == 'refs/heads/master'
     timeout-minutes: 20
     permissions:
+      actions: write
       contents: read
       packages: write
 
@@ -91,6 +92,8 @@ jobs:
         context: .
         file: ./Dockerfile
         platforms: linux/amd64,linux/arm64
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
         push: ${{ github.event_name != 'pull_request' }}
         tags: ${{ steps.meta.outputs.tags }}
         labels: |
@@ -105,6 +108,7 @@ jobs:
     if: github.event_name == 'push' && github.ref == 'refs/heads/master'
     timeout-minutes: 30
     permissions:
+      actions: write
       contents: read
 
     steps:
@@ -116,6 +120,8 @@ jobs:
 
     - name: Set up kind
       uses: engineerd/setup-kind@v0.6.2
+      with:
+        version: v0.24.0
 
     - name: Run integration test
       run: ./test/integration/run.sh
