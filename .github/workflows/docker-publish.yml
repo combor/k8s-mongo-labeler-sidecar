@@ -44,6 +44,8 @@ jobs:
       actions: write
       contents: read
       packages: write
+    outputs:
+      image_ref: ${{ steps.image.outputs.image_ref }}
 
     steps:
     - name: Checkout repository
@@ -62,8 +64,14 @@ jobs:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
 
-    - name: Set image name
-      run: echo "IMAGE_NAME=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
+    - name: Set image coordinates
+      id: image
+      run: |
+        IMAGE_NAME="ghcr.io/${GITHUB_REPOSITORY,,}"
+        IMAGE_TAG="ci-${GITHUB_SHA}"
+        IMAGE_REF="${IMAGE_NAME}:${IMAGE_TAG}"
+        echo "image_ref=${IMAGE_REF}" >> "$GITHUB_OUTPUT"
+        echo "IMAGE_NAME=${IMAGE_NAME}" >> "$GITHUB_ENV"
 
     - name: Extract Docker metadata
       id: meta
@@ -94,8 +102,10 @@ jobs:
         platforms: linux/amd64,linux/arm64
         cache-from: type=gha
         cache-to: type=gha,mode=max
-        push: ${{ github.event_name != 'pull_request' }}
-        tags: ${{ steps.meta.outputs.tags }}
+        push: true
+        tags: |
+          ${{ steps.meta.outputs.tags }}
+          ${{ steps.image.outputs.image_ref }}
         labels: |
           org.opencontainers.image.source=https://github.com/${{ github.repository }}
           org.opencontainers.image.revision=${{ github.sha }}
@@ -110,10 +120,21 @@ jobs:
     permissions:
       actions: write
       contents: read
+      packages: read
 
     steps:
     - name: Checkout repository
       uses: actions/checkout@v6
+
+    - name: Log in to GitHub Container Registry
+      uses: docker/login-action@v3
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Pull image from build-and-push job
+      run: docker pull "${{ needs.build-and-push.outputs.image_ref }}"
 
     - name: Set up kubectl
       uses: azure/setup-kubectl@v4
@@ -124,4 +145,7 @@ jobs:
         version: v0.24.0
 
     - name: Run integration test
+      env:
+        LABELER_IMAGE: ${{ needs.build-and-push.outputs.image_ref }}
+        USE_PREBUILT_IMAGE: "true"
       run: ./test/integration/run.sh

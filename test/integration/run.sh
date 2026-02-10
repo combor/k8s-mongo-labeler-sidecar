@@ -5,6 +5,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 CLUSTER_NAME="${CLUSTER_NAME:-mongo-labeler-it}"
 NAMESPACE="${NAMESPACE:-mongo-it}"
 LABELER_IMAGE="${LABELER_IMAGE:-mongo-labeler-it:local}"
+USE_PREBUILT_IMAGE="${USE_PREBUILT_IMAGE:-false}"
 KEEP_CLUSTER="${KEEP_CLUSTER:-false}"
 TIMEOUT="${TIMEOUT:-240s}"
 DOCKER_CONFIG_TMP=""
@@ -36,6 +37,10 @@ prepare_docker_host() {
   fi
 }
 
+escape_sed_replacement() {
+  printf '%s' "$1" | sed -e 's/[\\/&|]/\\&/g'
+}
+
 cleanup() {
   if [[ -n "${STACK_TMP}" ]]; then
     rm -f "${STACK_TMP}"
@@ -60,15 +65,35 @@ if ! [[ "${NAMESPACE}" =~ ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$ ]]; then
   exit 1
 fi
 
+if [[ "${USE_PREBUILT_IMAGE}" != "true" && "${USE_PREBUILT_IMAGE}" != "false" ]]; then
+  echo "Invalid USE_PREBUILT_IMAGE value: ${USE_PREBUILT_IMAGE} (expected true or false)"
+  exit 1
+fi
+
 STACK_TMP="$(mktemp)"
-sed "s/mongo-it/${NAMESPACE}/g" "${ROOT_DIR}/test/integration/stack.yaml" >"${STACK_TMP}"
+namespace_escaped="$(escape_sed_replacement "${NAMESPACE}")"
+labeler_image_escaped="$(escape_sed_replacement "${LABELER_IMAGE}")"
+sed \
+  -e "s/mongo-it/${namespace_escaped}/g" \
+  -e "s|mongo-labeler-it:local|${labeler_image_escaped}|g" \
+  "${ROOT_DIR}/test/integration/stack.yaml" >"${STACK_TMP}"
 
 echo "Creating kind cluster '${CLUSTER_NAME}'..."
 kind delete cluster --name "${CLUSTER_NAME}" >/dev/null 2>&1 || true
 kind create cluster --name "${CLUSTER_NAME}"
 
-echo "Building labeler image '${LABELER_IMAGE}'..."
-docker build -t "${LABELER_IMAGE}" "${ROOT_DIR}"
+if [[ "${USE_PREBUILT_IMAGE}" == "true" ]]; then
+  if ! docker image inspect "${LABELER_IMAGE}" >/dev/null 2>&1; then
+    echo "Labeler image '${LABELER_IMAGE}' not found locally. Pull or build it first."
+    exit 1
+  fi
+  echo "Using prebuilt labeler image '${LABELER_IMAGE}'."
+else
+  echo "Building labeler image '${LABELER_IMAGE}'..."
+  docker build -t "${LABELER_IMAGE}" "${ROOT_DIR}"
+fi
+
+echo "Loading labeler image '${LABELER_IMAGE}' into kind..."
 kind load docker-image --name "${CLUSTER_NAME}" "${LABELER_IMAGE}"
 
 echo "Deploying integration stack into namespace '${NAMESPACE}'..."
