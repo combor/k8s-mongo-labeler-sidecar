@@ -36,11 +36,24 @@ type Labeler struct {
 	K8scli *kubernetes.Clientset
 }
 
-func New() (*Labeler, error) {
-	config, err := getConfigFromEnvironment()
-	if err != nil {
-		return nil, err
+func configureLogger(level phuslog.Level) phuslog.Logger {
+	logger := phuslog.DefaultLogger
+	if phuslog.IsTerminal(os.Stderr.Fd()) {
+		logger = phuslog.Logger{
+			TimeFormat: "15:04:05",
+			Caller:     1,
+			Writer: &phuslog.ConsoleWriter{
+				ColorOutput:    true,
+				QuoteString:    true,
+				EndWithMessage: true,
+			},
+		}
 	}
+	logger.SetLevel(level)
+	return logger
+}
+
+func New(config *Config) (*Labeler, error) {
 	k8scli, err := getKubeClientSet()
 	if err != nil {
 		return nil, err
@@ -250,12 +263,19 @@ func (l *Labeler) getMongoPrimary() (string, error) {
 }
 
 func main() {
-	labeler, err := New()
+	phuslog.DefaultLogger = configureLogger(phuslog.InfoLevel)
+
+	config, err := getConfigFromEnvironment()
+	if err != nil {
+		phuslog.Fatal().Err(err).Msg("failed to read configuration")
+	}
+	phuslog.DefaultLogger = configureLogger(config.LogLevel)
+	phuslog.Info().Msgf("Setting logging level to %s", config.LogLevel.String())
+
+	labeler, err := New(config)
 	if err != nil {
 		phuslog.Fatal().Err(err).Msg("failed to initialize labeler")
 	}
-	phuslog.DefaultLogger.SetLevel(labeler.Config.LogLevel)
-	phuslog.Info().Msgf("Setting logging level to %s", labeler.Config.LogLevel.String())
 
 	ticker := time.NewTicker(5 * time.Second)
 	tickCh := ticker.C
