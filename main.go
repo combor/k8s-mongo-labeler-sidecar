@@ -52,68 +52,37 @@ func New() (*Labeler, error) {
 }
 
 func (l *Labeler) setPrimaryLabel() error {
-	primary, err := l.getMongoPrimary()
+	primaryPodName, err := l.getMongoPrimary()
 	if err != nil {
 		return err
 	}
-	listOptions := metav1.ListOptions{
-		LabelSelector: l.Config.LabelSelector,
-	}
-	pods, err := l.K8scli.CoreV1().Pods(l.Config.Namespace).List(context.Background(), listOptions)
+	podsClient := l.K8scli.CoreV1().Pods(l.Config.Namespace)
+	pods, err := podsClient.List(context.Background(), metav1.ListOptions{LabelSelector: l.Config.LabelSelector})
 	if err != nil {
 		return err
 	}
-	var found bool
+	foundPrimary := false
 	logrus.Debugf("Found %d pods", len(pods.Items))
 	for _, pod := range pods.Items {
-		name := pod.GetName()
-		var patchData map[string]interface{}
-
-		if name == primary {
+		currentPodIsPrimary := false
+		currentPodName := pod.GetName()
+		if currentPodName == primaryPodName {
+			currentPodIsPrimary = true
+			foundPrimary = true
 			if pod.Labels["primary"] != "true" {
-				logrus.Infof("Setting primary to true for pod %s", name)
-			}
-			patchData = map[string]interface{}{
-				"metadata": map[string]interface{}{
-					"labels": map[string]string{
-						"primary": "true",
-					},
-				},
-			}
-			found = true
-		} else {
-			if l.Config.LabelAll {
-				if pod.Labels["primary"] != "false" {
-					logrus.Infof("Setting primary to false for pod %s", name)
-				}
-				patchData = map[string]interface{}{
-					"metadata": map[string]interface{}{
-						"labels": map[string]string{
-							"primary": "false",
-						},
-					},
-				}
-			} else {
-				// To remove a label, set it to null in strategic merge patch
-				patchData = map[string]interface{}{
-					"metadata": map[string]interface{}{
-						"labels": map[string]interface{}{
-							"primary": nil,
-						},
-					},
-				}
+				logrus.Infof("Setting primary to true for pod %s", primaryPodName)
 			}
 		}
-
-		patchBytes, err := json.Marshal(patchData)
+		removePrimaryLabel := !currentPodIsPrimary && !l.Config.LabelAll
+		patchBytes, err := json.Marshal(primaryLabelPatch(currentPodIsPrimary, removePrimaryLabel))
 		if err != nil {
 			return err
 		}
 
-		logrus.Debugf("Patching pod %s with: %s", name, string(patchBytes))
-		_, err = l.K8scli.CoreV1().Pods(l.Config.Namespace).Patch(
+		logrus.Debugf("Patching pod %s with: %s", currentPodName, string(patchBytes))
+		_, err = podsClient.Patch(
 			context.Background(),
-			name,
+			currentPodName,
 			types.StrategicMergePatchType,
 			patchBytes,
 			metav1.PatchOptions{},
@@ -122,10 +91,25 @@ func (l *Labeler) setPrimaryLabel() error {
 			return err
 		}
 	}
-	if !found {
+	if !foundPrimary {
 		return fmt.Errorf("primary not found")
 	}
 	return nil
+}
+
+func primaryLabelPatch(value bool, remove bool) map[string]interface{} {
+	labelValue := interface{}(strconv.FormatBool(value))
+	if remove {
+		// To remove a label, set it to null in strategic merge patch.
+		labelValue = nil
+	}
+	return map[string]interface{}{
+		"metadata": map[string]interface{}{
+			"labels": map[string]interface{}{
+				"primary": labelValue,
+			},
+		},
+	}
 }
 
 func getConfigFromEnvironment() (*Config, error) {
