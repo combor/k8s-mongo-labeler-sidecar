@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sirupsen/logrus"
+	phuslog "github.com/phuslu/log"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
@@ -28,7 +28,7 @@ type Config struct {
 	Namespace     string
 	Address       string
 	LabelAll      bool
-	LogLevel      logrus.Level
+	LogLevel      phuslog.Level
 }
 
 type Labeler struct {
@@ -36,11 +36,24 @@ type Labeler struct {
 	K8scli *kubernetes.Clientset
 }
 
-func New() (*Labeler, error) {
-	config, err := getConfigFromEnvironment()
-	if err != nil {
-		return nil, err
+func configureLogger(level phuslog.Level) phuslog.Logger {
+	logger := phuslog.DefaultLogger
+	if phuslog.IsTerminal(os.Stderr.Fd()) {
+		logger = phuslog.Logger{
+			TimeFormat: "15:04:05",
+			Caller:     1,
+			Writer: &phuslog.ConsoleWriter{
+				ColorOutput:    true,
+				QuoteString:    true,
+				EndWithMessage: true,
+			},
+		}
 	}
+	logger.SetLevel(level)
+	return logger
+}
+
+func New(config *Config) (*Labeler, error) {
 	k8scli, err := getKubeClientSet()
 	if err != nil {
 		return nil, err
@@ -63,7 +76,7 @@ func (l *Labeler) setPrimaryLabel() error {
 		return err
 	}
 	foundPrimary := false
-	logrus.Debugf("Found %d pods", len(pods.Items))
+	phuslog.Debug().Msgf("Found %d pods", len(pods.Items))
 	for _, pod := range pods.Items {
 		currentPodIsPrimary := false
 		currentPodName := pod.GetName()
@@ -71,7 +84,7 @@ func (l *Labeler) setPrimaryLabel() error {
 			currentPodIsPrimary = true
 			foundPrimary = true
 			if pod.Labels["primary"] != "true" {
-				logrus.Infof("Setting primary to true for pod %s", primaryPodName)
+				phuslog.Info().Msgf("Setting primary to true for pod %s", primaryPodName)
 			}
 		}
 		removePrimaryLabel := !currentPodIsPrimary && !l.Config.LabelAll
@@ -80,7 +93,7 @@ func (l *Labeler) setPrimaryLabel() error {
 			return err
 		}
 
-		logrus.Debugf("Patching pod %s with: %s", currentPodName, string(patchBytes))
+		phuslog.Debug().Msgf("Patching pod %s with: %s", currentPodName, string(patchBytes))
 		_, err = podsClient.Patch(
 			context.Background(),
 			currentPodName,
@@ -125,7 +138,7 @@ func getConfigFromEnvironment() (*Config, error) {
 		Namespace:     "default",
 		Address:       "localhost:27017",
 		LabelAll:      false,
-		LogLevel:      logrus.InfoLevel,
+		LogLevel:      phuslog.InfoLevel,
 	}
 
 	if l, ok = os.LookupEnv("NAMESPACE"); ok {
@@ -147,7 +160,7 @@ func getConfigFromEnvironment() (*Config, error) {
 			return nil, fmt.Errorf("invalid DEBUG value %q: %w", l, err)
 		}
 		if parsed {
-			config.LogLevel = logrus.DebugLevel
+			config.LogLevel = phuslog.DebugLevel
 		}
 	}
 	return config, nil
@@ -200,7 +213,7 @@ func (l *Labeler) getMongoPrimary() (string, error) {
 	defer func() {
 		err := client.Disconnect(ctx)
 		if err != nil {
-			logrus.Debugf("unable to close mongo connection: %v", err)
+			phuslog.Debug().Msgf("unable to close mongo connection: %v", err)
 		}
 	}()
 	if err = client.Ping(ctx, nil); err != nil {
@@ -224,7 +237,7 @@ func (l *Labeler) getMongoPrimary() (string, error) {
 	if !ok {
 		return "", fmt.Errorf("invalid hosts type %T", hostsValue)
 	}
-	logrus.Debugf("Hosts %v", hosts)
+	phuslog.Debug().Msgf("Hosts %v", hosts)
 
 	primaryHost, _ := hello["primary"].(string)
 	if primaryHost == "" {
@@ -250,12 +263,19 @@ func (l *Labeler) getMongoPrimary() (string, error) {
 }
 
 func main() {
-	labeler, err := New()
+	phuslog.DefaultLogger = configureLogger(phuslog.InfoLevel)
+
+	config, err := getConfigFromEnvironment()
 	if err != nil {
-		logrus.Fatal(err)
+		phuslog.Fatal().Err(err).Msg("failed to read configuration")
 	}
-	logrus.SetLevel(labeler.Config.LogLevel)
-	logrus.Infof("Setting logging level to %s", labeler.Config.LogLevel.String())
+	phuslog.DefaultLogger = configureLogger(config.LogLevel)
+	phuslog.Info().Msgf("Setting logging level to %s", config.LogLevel.String())
+
+	labeler, err := New(config)
+	if err != nil {
+		phuslog.Fatal().Err(err).Msg("failed to initialize labeler")
+	}
 
 	ticker := time.NewTicker(5 * time.Second)
 	tickCh := ticker.C
@@ -265,10 +285,10 @@ func main() {
 		case <-tickCh:
 			err := labeler.setPrimaryLabel()
 			if err != nil {
-				logrus.Error(err)
+				phuslog.Error().Err(err).Msg("failed to set primary label")
 			}
 		case <-done:
-			logrus.Info("Done")
+			phuslog.Info().Msg("Done")
 			return
 		}
 	}

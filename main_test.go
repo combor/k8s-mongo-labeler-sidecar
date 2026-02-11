@@ -4,7 +4,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/sirupsen/logrus"
+	phuslog "github.com/phuslu/log"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -65,7 +65,7 @@ func TestGetConfigFromEnvironment(t *testing.T) {
 				Namespace:     "test-namespace",
 				Address:       "mongo:27017",
 				LabelAll:      true,
-				LogLevel:      logrus.DebugLevel,
+				LogLevel:      phuslog.DebugLevel,
 			},
 			expectedErrorContains: "",
 		},
@@ -90,7 +90,7 @@ func TestGetConfigFromEnvironment(t *testing.T) {
 				Namespace:     "default",
 				Address:       "localhost:27017",
 				LabelAll:      false,
-				LogLevel:      logrus.InfoLevel,
+				LogLevel:      phuslog.InfoLevel,
 			},
 			expectedErrorContains: "",
 		},
@@ -106,7 +106,7 @@ func TestGetConfigFromEnvironment(t *testing.T) {
 				Namespace:     "default",
 				Address:       "localhost:27017",
 				LabelAll:      false,
-				LogLevel:      logrus.InfoLevel,
+				LogLevel:      phuslog.InfoLevel,
 			},
 			expectedErrorContains: "",
 		},
