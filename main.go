@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -237,11 +238,15 @@ func (l *Labeler) getMongoPrimary() (string, error) {
 			primaryHost, _ = hello["me"].(string)
 		}
 	}
-	primary := strings.Split(primaryHost, ".")[0]
-	if len(primary) != 0 {
-		return primary, nil
+	host, _, err := net.SplitHostPort(primaryHost)
+	if err != nil {
+		return "", fmt.Errorf("invalid primary host %q: %w", primaryHost, err)
 	}
-	return "", fmt.Errorf("can't find primary server")
+	primaryPodName := strings.Split(host, ".")[0]
+	if len(primaryPodName) != 0 {
+		return primaryPodName, nil
+	}
+	return "", fmt.Errorf("unable to derive primary pod name from host %q", host)
 }
 
 func main() {
