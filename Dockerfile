@@ -1,10 +1,22 @@
-FROM --platform=$BUILDPLATFORM  golang:1.25-bookworm AS builder
+# syntax=docker/dockerfile:1.7
+FROM --platform=$BUILDPLATFORM golang:1.25-bookworm AS builder
 
-ARG TARGETOS
+ARG TARGETOS=linux
 ARG TARGETARCH
-COPY . $GOPATH/src/github.com/combor/k8s-mongo-primary-sidecar/
-WORKDIR $GOPATH/src/github.com/combor/k8s-mongo-primary-sidecar/
-RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -o /primary-sidecar
+
+WORKDIR /src
+ENV GOMODCACHE=/go/pkg/mod
+ENV GOCACHE=/root/.cache/go-build
+
+COPY go.mod go.sum ./
+RUN --mount=type=cache,target=/go/pkg/mod,id=k8s-mongo-labeler-go-mod-cache \
+    go mod download
+
+COPY *.go ./
+RUN --mount=type=cache,target=/go/pkg/mod,id=k8s-mongo-labeler-go-mod-cache \
+    --mount=type=cache,target=/root/.cache/go-build,id=k8s-mongo-labeler-go-build-cache \
+    CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -o /primary-sidecar
+
 FROM gcr.io/distroless/static-debian13:nonroot
 ARG TARGETOS
 ARG TARGETARCH
