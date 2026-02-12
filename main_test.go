@@ -1,12 +1,18 @@
 package main
 
 import (
+	"encoding/json"
 	"os"
 	"testing"
 	"time"
 
 	phuslog "github.com/phuslu/log"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes/fake"
+	k8stesting "k8s.io/client-go/testing"
 )
 
 type envState struct {
@@ -157,4 +163,79 @@ func TestGetConfigFromEnvironment(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestSetPrimaryLabel_LabelAllTrue(t *testing.T) {
+	k8sClient := fake.NewClientset(
+		&corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "mongo-0",
+				Namespace: "default",
+				Labels: map[string]string{
+					"role": "mongo",
+				},
+			},
+		},
+		&corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "mongo-1",
+				Namespace: "default",
+				Labels: map[string]string{
+					"role": "mongo",
+				},
+			},
+		},
+		&corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "mongo-2",
+				Namespace: "default",
+				Labels: map[string]string{
+					"role": "mongo",
+				},
+			},
+		},
+	)
+
+	labeler := &Labeler{
+		Config: &Config{
+			LabelSelector:     "role=mongo",
+			Namespace:         "default",
+			LabelAll:          true,
+			K8sRequestTimeout: time.Second,
+		},
+		K8sClient: k8sClient,
+		primaryResolver: func() (string, error) {
+			return "mongo-1", nil
+		},
+	}
+
+	err := labeler.setPrimaryLabel()
+	require.NoError(t, err)
+
+	primaryValuesByPod := map[string]string{}
+	for _, action := range k8sClient.Actions() {
+		if action.GetVerb() != "patch" || action.GetResource().Resource != "pods" {
+			continue
+		}
+		patchAction, ok := action.(k8stesting.PatchAction)
+		require.True(t, ok)
+
+		var patch map[string]any
+		require.NoError(t, json.Unmarshal(patchAction.GetPatch(), &patch))
+
+		metadata, ok := patch["metadata"].(map[string]any)
+		require.True(t, ok)
+		labels, ok := metadata["labels"].(map[string]any)
+		require.True(t, ok)
+		primaryValue, ok := labels["primary"].(string)
+		require.True(t, ok)
+
+		primaryValuesByPod[patchAction.GetName()] = primaryValue
+	}
+
+	assert.Equal(t, map[string]string{
+		"mongo-0": "false",
+		"mongo-1": "true",
+		"mongo-2": "false",
+	}, primaryValuesByPod)
 }

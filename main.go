@@ -33,8 +33,9 @@ type Config struct {
 }
 
 type Labeler struct {
-	Config *Config
-	K8scli *kubernetes.Clientset
+	Config          *Config
+	K8sClient       kubernetes.Interface
+	primaryResolver func() (string, error)
 }
 
 const defaultK8sRequestTimeout = 10 * time.Second
@@ -57,25 +58,29 @@ func configureLogger(level phuslog.Level) phuslog.Logger {
 }
 
 func New(config *Config) (*Labeler, error) {
-	k8scli, err := getKubeClientSet()
+	k8sClient, err := getKubeClientSet()
 	if err != nil {
 		return nil, err
 	}
 	return &Labeler{
 		Config: config,
-		K8scli: k8scli,
+		K8sClient: k8sClient,
 	}, nil
 
 }
 
 func (l *Labeler) setPrimaryLabel() error {
-	primaryPodName, err := l.getMongoPrimary()
+	primaryResolver := l.primaryResolver
+	if primaryResolver == nil {
+		primaryResolver = l.getMongoPrimary
+	}
+	primaryPodName, err := primaryResolver()
 	if err != nil {
 		return err
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), l.Config.K8sRequestTimeout)
 	defer cancel()
-	podsClient := l.K8scli.CoreV1().Pods(l.Config.Namespace)
+	podsClient := l.K8sClient.CoreV1().Pods(l.Config.Namespace)
 	pods, err := podsClient.List(ctx, metav1.ListOptions{LabelSelector: l.Config.LabelSelector})
 	if err != nil {
 		return err
