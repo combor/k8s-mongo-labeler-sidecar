@@ -89,4 +89,4 @@ Optional overrides:
 - `TIMEOUT` (default `240s`)
 - `KEEP_CLUSTER=true` (keep cluster for debugging)
 
-The script creates a temporary kind cluster, deploys a 3-pod Mongo StatefulSet + sidecar into the default namespace, enables `LABEL_ALL=true`, and verifies that exactly one pod has `primary=true` while non-primary pods have `primary=false`.
+The script creates a temporary kind cluster, deploys a 3-pod Mongo StatefulSet and verifies that exactly one pod has `primary=true` while non-primary pods have `primary=false`.

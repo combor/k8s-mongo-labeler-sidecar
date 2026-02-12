@@ -77,7 +77,6 @@ kind load docker-image --name "${CLUSTER_NAME}" "${LABELER_IMAGE}"
 echo "Deploying integration stack into default namespace..."
 kubectl apply -f "${ROOT_DIR}/test/integration/stack.yaml"
 kubectl set image statefulset/mongo labeler="${LABELER_IMAGE}"
-kubectl set env statefulset/mongo --containers=labeler LABEL_ALL=true
 kubectl rollout status statefulset/mongo --timeout="${TIMEOUT}"
 
 pods=(mongo-0 mongo-1 mongo-2)
