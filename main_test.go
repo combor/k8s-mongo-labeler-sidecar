@@ -251,3 +251,24 @@ func TestSetPrimaryLabel_LabelAllVariants(t *testing.T) {
 		})
 	}
 }
+
+func TestSetPrimaryLabel_PrimaryNotFound(t *testing.T) {
+	k8sClient := newMongoClientset("default", "mongo-0", "mongo-1", "mongo-2")
+
+	labeler := &Labeler{
+		Config: &Config{
+			LabelSelector:     "role=mongo",
+			Namespace:         "default",
+			LabelAll:          true,
+			K8sRequestTimeout: time.Second,
+		},
+		K8sClient: k8sClient,
+		primaryResolver: func() (string, error) {
+			return "mongo-9", nil
+		},
+	}
+
+	err := labeler.setPrimaryLabel()
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "primary not found")
+}
