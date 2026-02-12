@@ -7,23 +7,6 @@ LABELER_IMAGE="${LABELER_IMAGE:-mongo-labeler:local}"
 USE_PREBUILT_IMAGE="${USE_PREBUILT_IMAGE:-false}"
 KEEP_CLUSTER="${KEEP_CLUSTER:-false}"
 TIMEOUT="${TIMEOUT:-240s}"
-DOCKER_CONFIG_TMP=""
-
-prepare_docker_config() {
-  if [[ -n "${DOCKER_CONFIG:-}" ]]; then
-    return
-  fi
-  DOCKER_CONFIG_TMP="$(mktemp -d)"
-  export DOCKER_CONFIG="${DOCKER_CONFIG_TMP}"
-  cat >"${DOCKER_CONFIG}/config.json" <<'JSON'
-{
-  "auths": {},
-  "cliPluginsExtraDirs": [
-    "/opt/homebrew/lib/docker/cli-plugins"
-  ]
-}
-JSON
-}
 
 prepare_docker_host() {
   if [[ -n "${DOCKER_HOST:-}" ]]; then
@@ -36,9 +19,6 @@ prepare_docker_host() {
 }
 
 cleanup() {
-  if [[ -n "${DOCKER_CONFIG_TMP}" ]]; then
-    rm -rf "${DOCKER_CONFIG_TMP}"
-  fi
   if [[ "${KEEP_CLUSTER}" == "true" ]]; then
     echo "Keeping cluster '${CLUSTER_NAME}' (KEEP_CLUSTER=true)."
     return
@@ -47,13 +27,25 @@ cleanup() {
 }
 trap cleanup EXIT
 
-prepare_docker_config
 prepare_docker_host
 export DOCKER_BUILDKIT=1
 
 if [[ "${USE_PREBUILT_IMAGE}" != "true" && "${USE_PREBUILT_IMAGE}" != "false" ]]; then
   echo "Invalid USE_PREBUILT_IMAGE value: ${USE_PREBUILT_IMAGE} (expected true or false)"
   exit 1
+fi
+
+ensure_buildx_available() {
+  if docker buildx version >/dev/null 2>&1; then
+    return
+  fi
+  echo "ERROR: docker buildx is not available."
+  echo "Install/enable Docker Buildx and verify with: docker buildx version"
+  exit 1
+}
+
+if [[ "${USE_PREBUILT_IMAGE}" == "false" ]]; then
+  ensure_buildx_available
 fi
 
 echo "Creating kind cluster '${CLUSTER_NAME}'..."
