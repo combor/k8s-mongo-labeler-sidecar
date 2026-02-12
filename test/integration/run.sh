@@ -30,11 +30,6 @@ trap cleanup EXIT
 prepare_docker_host
 export DOCKER_BUILDKIT=1
 
-if [[ "${USE_PREBUILT_IMAGE}" != "true" && "${USE_PREBUILT_IMAGE}" != "false" ]]; then
-  echo "Invalid USE_PREBUILT_IMAGE value: ${USE_PREBUILT_IMAGE} (expected true or false)"
-  exit 1
-fi
-
 ensure_buildx_available() {
   if docker buildx version >/dev/null 2>&1; then
     return
