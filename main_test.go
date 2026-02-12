@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"testing"
 	"time"
@@ -262,4 +263,18 @@ func TestSetPrimaryLabel_PrimaryNotFound(t *testing.T) {
 	err := labeler.setPrimaryLabel()
 	require.Error(t, err)
 	assert.ErrorContains(t, err, "primary not found")
+}
+
+func TestSetPrimaryLabel_PrimaryResolverError(t *testing.T) {
+	k8sClient := newMongoClientset("default", "mongo-0", "mongo-1", "mongo-2")
+	primaryErr := errors.New("mongo unavailable")
+	labeler := newTestLabeler(k8sClient, true, "mongo-1")
+	labeler.primaryResolver = func() (string, error) {
+		return "", primaryErr
+	}
+
+	err := labeler.setPrimaryLabel()
+	require.Error(t, err)
+	assert.ErrorIs(t, err, primaryErr)
+	assert.Len(t, k8sClient.Actions(), 0)
 }
