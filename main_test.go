@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"testing"
+	"time"
 
 	phuslog "github.com/phuslu/log"
 	"github.com/stretchr/testify/assert"
@@ -16,7 +17,7 @@ type envState struct {
 func setConfigEnv(t *testing.T, env map[string]string) {
 	t.Helper()
 
-	keys := []string{"LABEL_SELECTOR", "NAMESPACE", "MONGO_ADDRESS", "LABEL_ALL", "DEBUG"}
+	keys := []string{"LABEL_SELECTOR", "NAMESPACE", "MONGO_ADDRESS", "LABEL_ALL", "DEBUG", "K8S_REQUEST_TIMEOUT"}
 	original := make(map[string]envState, len(keys))
 	for _, key := range keys {
 		value, ok := os.LookupEnv(key)
@@ -54,18 +55,20 @@ func TestGetConfigFromEnvironment(t *testing.T) {
 		{
 			name: "all environment variables set",
 			env: map[string]string{
-				"LABEL_SELECTOR": "app=mongo",
-				"NAMESPACE":      "test-namespace",
-				"MONGO_ADDRESS":  "mongo:27017",
-				"LABEL_ALL":      "true",
-				"DEBUG":          "true",
+				"LABEL_SELECTOR":      "app=mongo",
+				"NAMESPACE":           "test-namespace",
+				"MONGO_ADDRESS":       "mongo:27017",
+				"LABEL_ALL":           "true",
+				"DEBUG":               "true",
+				"K8S_REQUEST_TIMEOUT": "7s",
 			},
 			expectedConfig: &Config{
-				LabelSelector: "app=mongo",
-				Namespace:     "test-namespace",
-				Address:       "mongo:27017",
-				LabelAll:      true,
-				LogLevel:      phuslog.DebugLevel,
+				LabelSelector:     "app=mongo",
+				Namespace:         "test-namespace",
+				Address:           "mongo:27017",
+				LabelAll:          true,
+				LogLevel:          phuslog.DebugLevel,
+				K8sRequestTimeout: 7 * time.Second,
 			},
 			expectedErrorContains: "",
 		},
@@ -86,11 +89,12 @@ func TestGetConfigFromEnvironment(t *testing.T) {
 				"LABEL_SELECTOR": "app=mongo",
 			},
 			expectedConfig: &Config{
-				LabelSelector: "app=mongo",
-				Namespace:     "default",
-				Address:       "localhost:27017",
-				LabelAll:      false,
-				LogLevel:      phuslog.InfoLevel,
+				LabelSelector:     "app=mongo",
+				Namespace:         "default",
+				Address:           "localhost:27017",
+				LabelAll:          false,
+				LogLevel:          phuslog.InfoLevel,
+				K8sRequestTimeout: defaultK8sRequestTimeout,
 			},
 			expectedErrorContains: "",
 		},
@@ -102,11 +106,12 @@ func TestGetConfigFromEnvironment(t *testing.T) {
 				"DEBUG":          "false",
 			},
 			expectedConfig: &Config{
-				LabelSelector: "app=mongo",
-				Namespace:     "default",
-				Address:       "localhost:27017",
-				LabelAll:      false,
-				LogLevel:      phuslog.InfoLevel,
+				LabelSelector:     "app=mongo",
+				Namespace:         "default",
+				Address:           "localhost:27017",
+				LabelAll:          false,
+				LogLevel:          phuslog.InfoLevel,
+				K8sRequestTimeout: defaultK8sRequestTimeout,
 			},
 			expectedErrorContains: "",
 		},
@@ -127,6 +132,15 @@ func TestGetConfigFromEnvironment(t *testing.T) {
 			},
 			expectedConfig:        nil,
 			expectedErrorContains: "invalid LABEL_ALL value",
+		},
+		{
+			name: "invalid K8S_REQUEST_TIMEOUT value",
+			env: map[string]string{
+				"LABEL_SELECTOR":      "app=mongo",
+				"K8S_REQUEST_TIMEOUT": "not-a-duration",
+			},
+			expectedConfig:        nil,
+			expectedErrorContains: "invalid K8S_REQUEST_TIMEOUT value",
 		},
 	}
 

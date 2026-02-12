@@ -24,17 +24,20 @@ import (
 )
 
 type Config struct {
-	LabelSelector string
-	Namespace     string
-	Address       string
-	LabelAll      bool
-	LogLevel      phuslog.Level
+	LabelSelector     string
+	Namespace         string
+	Address           string
+	LabelAll          bool
+	LogLevel          phuslog.Level
+	K8sRequestTimeout time.Duration
 }
 
 type Labeler struct {
 	Config *Config
 	K8scli *kubernetes.Clientset
 }
+
+const defaultK8sRequestTimeout = 10 * time.Second
 
 func configureLogger(level phuslog.Level) phuslog.Logger {
 	logger := phuslog.DefaultLogger
@@ -70,8 +73,10 @@ func (l *Labeler) setPrimaryLabel() error {
 	if err != nil {
 		return err
 	}
+	ctx, cancel := context.WithTimeout(context.Background(), l.Config.K8sRequestTimeout)
+	defer cancel()
 	podsClient := l.K8scli.CoreV1().Pods(l.Config.Namespace)
-	pods, err := podsClient.List(context.Background(), metav1.ListOptions{LabelSelector: l.Config.LabelSelector})
+	pods, err := podsClient.List(ctx, metav1.ListOptions{LabelSelector: l.Config.LabelSelector})
 	if err != nil {
 		return err
 	}
@@ -95,7 +100,7 @@ func (l *Labeler) setPrimaryLabel() error {
 
 		phuslog.Debug().Msgf("Patching pod %s with: %s", currentPodName, string(patchBytes))
 		_, err = podsClient.Patch(
-			context.Background(),
+			ctx,
 			currentPodName,
 			types.StrategicMergePatchType,
 			patchBytes,
@@ -134,11 +139,12 @@ func getConfigFromEnvironment() (*Config, error) {
 	}
 
 	config := &Config{
-		LabelSelector: l,
-		Namespace:     "default",
-		Address:       "localhost:27017",
-		LabelAll:      false,
-		LogLevel:      phuslog.InfoLevel,
+		LabelSelector:     l,
+		Namespace:         "default",
+		Address:           "localhost:27017",
+		LabelAll:          false,
+		LogLevel:          phuslog.InfoLevel,
+		K8sRequestTimeout: defaultK8sRequestTimeout,
 	}
 
 	if l, ok = os.LookupEnv("NAMESPACE"); ok {
@@ -162,6 +168,13 @@ func getConfigFromEnvironment() (*Config, error) {
 		if parsed {
 			config.LogLevel = phuslog.DebugLevel
 		}
+	}
+	if l, ok = os.LookupEnv("K8S_REQUEST_TIMEOUT"); ok {
+		parsed, err := time.ParseDuration(l)
+		if err != nil {
+			return nil, fmt.Errorf("invalid K8S_REQUEST_TIMEOUT value %q: %w", l, err)
+		}
+		config.K8sRequestTimeout = parsed
 	}
 	return config, nil
 }

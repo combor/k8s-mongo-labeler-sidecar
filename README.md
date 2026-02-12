@@ -45,10 +45,11 @@ Environment variables:
 | `LABEL_SELECTOR` | yes | none | Pod label selector (for example `role=mongo`). |
 | `NAMESPACE` | no | `default` | Namespace where pods are listed and patched. |
 | `MONGO_ADDRESS` | no | `localhost:27017` | MongoDB endpoint used for primary detection. |
+| `K8S_REQUEST_TIMEOUT` | no | `10s` | Timeout for Kubernetes list/patch API requests (Go duration format, for example `5s`, `1m`). |
 | `LABEL_ALL` | no | `false` | Boolean. If `true`, non-primary pods get `primary=false`; if `false`, the label is removed. |
 | `DEBUG` | no | `false` | Boolean. If `true`, enables debug logging. |
 
-`LABEL_ALL` and `DEBUG` are parsed as booleans. Invalid values fail startup.
+`LABEL_ALL` and `DEBUG` are parsed as booleans. `K8S_REQUEST_TIMEOUT` is parsed as a Go duration. Invalid values fail startup.
 
 ## Published image
 
