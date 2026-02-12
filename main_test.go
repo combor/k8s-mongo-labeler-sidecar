@@ -68,6 +68,21 @@ func newMongoClientset(namespace string, podNames ...string) *fake.Clientset {
 	return fake.NewClientset(objects...)
 }
 
+func newTestLabeler(k8sClient *fake.Clientset, labelAll bool, primaryPodName string) *Labeler {
+	return &Labeler{
+		Config: &Config{
+			LabelSelector:     "role=mongo",
+			Namespace:         "default",
+			LabelAll:          labelAll,
+			K8sRequestTimeout: time.Second,
+		},
+		K8sClient: k8sClient,
+		primaryResolver: func() (string, error) {
+			return primaryPodName, nil
+		},
+	}
+}
+
 func TestGetConfigFromEnvironment(t *testing.T) {
 	tests := []struct {
 		name                  string
@@ -211,19 +226,7 @@ func TestSetPrimaryLabel_LabelAllVariants(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			k8sClient := newMongoClientset("default", "mongo-0", "mongo-1", "mongo-2")
-
-			labeler := &Labeler{
-				Config: &Config{
-					LabelSelector:     "role=mongo",
-					Namespace:         "default",
-					LabelAll:          tt.labelAll,
-					K8sRequestTimeout: time.Second,
-				},
-				K8sClient: k8sClient,
-				primaryResolver: func() (string, error) {
-					return "mongo-1", nil
-				},
-			}
+			labeler := newTestLabeler(k8sClient, tt.labelAll, "mongo-1")
 
 			err := labeler.setPrimaryLabel()
 			require.NoError(t, err)
@@ -254,19 +257,7 @@ func TestSetPrimaryLabel_LabelAllVariants(t *testing.T) {
 
 func TestSetPrimaryLabel_PrimaryNotFound(t *testing.T) {
 	k8sClient := newMongoClientset("default", "mongo-0", "mongo-1", "mongo-2")
-
-	labeler := &Labeler{
-		Config: &Config{
-			LabelSelector:     "role=mongo",
-			Namespace:         "default",
-			LabelAll:          true,
-			K8sRequestTimeout: time.Second,
-		},
-		K8sClient: k8sClient,
-		primaryResolver: func() (string, error) {
-			return "mongo-9", nil
-		},
-	}
+	labeler := newTestLabeler(k8sClient, true, "mongo-9")
 
 	err := labeler.setPrimaryLabel()
 	require.Error(t, err)
