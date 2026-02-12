@@ -49,8 +49,24 @@ kind create cluster --name "${CLUSTER_NAME}"
 
 if [[ "${USE_PREBUILT_IMAGE}" == "true" ]]; then
   if ! docker image inspect "${LABELER_IMAGE}" >/dev/null 2>&1; then
-    echo "Labeler image '${LABELER_IMAGE}' not found locally. Pull or build it first."
-    exit 1
+    case "$(uname -m)" in
+      x86_64|amd64)
+        OFFICIAL_LABELER_IMAGE="ghcr.io/combor/k8s-mongo-labeler-sidecar:latest-amd64"
+        ;;
+      arm64|aarch64)
+        OFFICIAL_LABELER_IMAGE="ghcr.io/combor/k8s-mongo-labeler-sidecar:latest-arm64"
+        ;;
+      *)
+        OFFICIAL_LABELER_IMAGE="ghcr.io/combor/k8s-mongo-labeler-sidecar:latest"
+        ;;
+    esac
+
+    echo "Labeler image '${LABELER_IMAGE}' not found locally. Pulling official image '${OFFICIAL_LABELER_IMAGE}'..."
+    if ! docker pull "${OFFICIAL_LABELER_IMAGE}"; then
+      echo "ERROR: Failed to pull official image '${OFFICIAL_LABELER_IMAGE}'."
+      exit 1
+    fi
+    LABELER_IMAGE="${OFFICIAL_LABELER_IMAGE}"
   fi
   echo "Using prebuilt labeler image '${LABELER_IMAGE}'."
 else
