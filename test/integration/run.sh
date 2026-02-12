@@ -8,16 +8,6 @@ USE_PREBUILT_IMAGE="${USE_PREBUILT_IMAGE:-false}"
 KEEP_CLUSTER="${KEEP_CLUSTER:-false}"
 TIMEOUT="${TIMEOUT:-240s}"
 
-prepare_docker_host() {
-  if [[ -n "${DOCKER_HOST:-}" ]]; then
-    return
-  fi
-  local colima_socket="${HOME}/.colima/default/docker.sock"
-  if [[ -S "${colima_socket}" ]]; then
-    export DOCKER_HOST="unix://${colima_socket}"
-  fi
-}
-
 cleanup() {
   if [[ "${KEEP_CLUSTER}" == "true" ]]; then
     echo "Keeping cluster '${CLUSTER_NAME}' (KEEP_CLUSTER=true)."
@@ -27,8 +17,21 @@ cleanup() {
 }
 trap cleanup EXIT
 
-prepare_docker_host
 export DOCKER_BUILDKIT=1
+
+ensure_docker_available() {
+  if docker info >/dev/null 2>&1; then
+    return
+  fi
+
+  if [[ -n "${DOCKER_HOST:-}" ]]; then
+    echo "ERROR: Docker daemon is not reachable via DOCKER_HOST=${DOCKER_HOST}."
+  else
+    echo "ERROR: Docker daemon is not reachable."
+  fi
+  echo "Verify Docker daemon connectivity with: docker info"
+  exit 1
+}
 
 ensure_buildx_available() {
   if docker buildx version >/dev/null 2>&1; then
@@ -38,6 +41,8 @@ ensure_buildx_available() {
   echo "Install/enable Docker Buildx and verify with: docker buildx version"
   exit 1
 }
+
+ensure_docker_available
 
 if [[ "${USE_PREBUILT_IMAGE}" == "false" ]]; then
   ensure_buildx_available
