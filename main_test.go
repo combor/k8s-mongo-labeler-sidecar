@@ -165,77 +165,100 @@ func TestGetConfigFromEnvironment(t *testing.T) {
 	}
 }
 
-func TestSetPrimaryLabel_LabelAllTrue(t *testing.T) {
-	k8sClient := fake.NewClientset(
-		&corev1.Pod{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      "mongo-0",
-				Namespace: "default",
-				Labels: map[string]string{
-					"role": "mongo",
-				},
+func TestSetPrimaryLabel_LabelAllVariants(t *testing.T) {
+	tests := []struct {
+		name                 string
+		labelAll             bool
+		expectedPrimaryByPod map[string]any
+	}{
+		{
+			name:     "label all true",
+			labelAll: true,
+			expectedPrimaryByPod: map[string]any{
+				"mongo-0": "false",
+				"mongo-1": "true",
+				"mongo-2": "false",
 			},
 		},
-		&corev1.Pod{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      "mongo-1",
-				Namespace: "default",
-				Labels: map[string]string{
-					"role": "mongo",
-				},
+		{
+			name:     "label all false",
+			labelAll: false,
+			expectedPrimaryByPod: map[string]any{
+				"mongo-0": nil,
+				"mongo-1": "true",
+				"mongo-2": nil,
 			},
-		},
-		&corev1.Pod{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      "mongo-2",
-				Namespace: "default",
-				Labels: map[string]string{
-					"role": "mongo",
-				},
-			},
-		},
-	)
-
-	labeler := &Labeler{
-		Config: &Config{
-			LabelSelector:     "role=mongo",
-			Namespace:         "default",
-			LabelAll:          true,
-			K8sRequestTimeout: time.Second,
-		},
-		K8sClient: k8sClient,
-		primaryResolver: func() (string, error) {
-			return "mongo-1", nil
 		},
 	}
 
-	err := labeler.setPrimaryLabel()
-	require.NoError(t, err)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			k8sClient := fake.NewClientset(
+				&corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "mongo-0",
+						Namespace: "default",
+						Labels: map[string]string{
+							"role": "mongo",
+						},
+					},
+				},
+				&corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "mongo-1",
+						Namespace: "default",
+						Labels: map[string]string{
+							"role": "mongo",
+						},
+					},
+				},
+				&corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "mongo-2",
+						Namespace: "default",
+						Labels: map[string]string{
+							"role": "mongo",
+						},
+					},
+				},
+			)
 
-	primaryValuesByPod := map[string]string{}
-	for _, action := range k8sClient.Actions() {
-		if action.GetVerb() != "patch" || action.GetResource().Resource != "pods" {
-			continue
-		}
-		patchAction, ok := action.(k8stesting.PatchAction)
-		require.True(t, ok)
+			labeler := &Labeler{
+				Config: &Config{
+					LabelSelector:     "role=mongo",
+					Namespace:         "default",
+					LabelAll:          tt.labelAll,
+					K8sRequestTimeout: time.Second,
+				},
+				K8sClient: k8sClient,
+				primaryResolver: func() (string, error) {
+					return "mongo-1", nil
+				},
+			}
 
-		var patch map[string]any
-		require.NoError(t, json.Unmarshal(patchAction.GetPatch(), &patch))
+			err := labeler.setPrimaryLabel()
+			require.NoError(t, err)
 
-		metadata, ok := patch["metadata"].(map[string]any)
-		require.True(t, ok)
-		labels, ok := metadata["labels"].(map[string]any)
-		require.True(t, ok)
-		primaryValue, ok := labels["primary"].(string)
-		require.True(t, ok)
+			primaryValuesByPod := map[string]any{}
+			for _, action := range k8sClient.Actions() {
+				if action.GetVerb() != "patch" || action.GetResource().Resource != "pods" {
+					continue
+				}
+				patchAction, ok := action.(k8stesting.PatchAction)
+				require.True(t, ok)
 
-		primaryValuesByPod[patchAction.GetName()] = primaryValue
+				var patch map[string]any
+				require.NoError(t, json.Unmarshal(patchAction.GetPatch(), &patch))
+
+				metadata, ok := patch["metadata"].(map[string]any)
+				require.True(t, ok)
+				labels, ok := metadata["labels"].(map[string]any)
+				require.True(t, ok)
+
+				primaryValuesByPod[patchAction.GetName()] = labels["primary"]
+			}
+
+			assert.Equal(t, tt.expectedPrimaryByPod, primaryValuesByPod)
+		})
 	}
-
-	assert.Equal(t, map[string]string{
-		"mongo-0": "false",
-		"mongo-1": "true",
-		"mongo-2": "false",
-	}, primaryValuesByPod)
 }
