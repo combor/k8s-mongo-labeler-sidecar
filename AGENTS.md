@@ -36,7 +36,8 @@ This repository builds `k8s-mongo-labeler-sidecar`, a Go sidecar that detects th
 - Do NOT invent bugs; if evidence is weak, say so and skip.
 - Prefer the smallest safe fix; avoid refactors and unrelated cleanup.
 - Anchor each suggestion to concrete evidence
-- Avoid generic advice; make each recommendation actionable and specific.
+- Avoid generic advice; make each recommendation actionable and specific
+- in the commit messages provide explanation why the chage was made
 
 ## Validation checklist
 
