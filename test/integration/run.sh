@@ -67,7 +67,7 @@ echo "Loading labeler image '${LABELER_IMAGE}' into kind..."
 kind load docker-image --name "${CLUSTER_NAME}" "${LABELER_IMAGE}"
 
 echo "Deploying integration stack into default namespace..."
-kubectl kustomize --load-restrictor=LoadRestrictionsNone "${ROOT_DIR}/test/integration" | kubectl apply -f -
+kubectl apply -f "${ROOT_DIR}/deployment-example.yaml"
 kubectl set image statefulset/mongo labeler="${LABELER_IMAGE}"
 kubectl rollout status statefulset/mongo --timeout="${TIMEOUT}"
 
