@@ -109,7 +109,7 @@ spec:
           readOnly: true
       # Mongo labeler sidecar
       - name: labeler
-        image: your-registry/k8s-mongo-labeler-sidecar:latest
+        image: ghcr.io/combor/k8s-mongo-labeler-sidecar:0.5.0
         env:
         - name: LABEL_SELECTOR
           value: "role=mongo"
@@ -122,7 +122,7 @@ spec:
         - name: LABEL_ALL
           value: "true"
         - name: DEBUG
-          value: "false"
+          value: "true"
         # Security context for the sidecar
         securityContext:
           runAsNonRoot: true
@@ -136,15 +136,9 @@ spec:
           seccompProfile:
             type: RuntimeDefault
       volumes:
+      - name: mongo-persistent-storage
+        emptyDir: {}
       - name: mongo-bootstrap
         configMap:
           name: mongo-bootstrap
           defaultMode: 0755
-  volumeClaimTemplates:
-  - metadata:
-      name: mongo-persistent-storage
-    spec:
-      accessModes: [ "ReadWriteOnce" ]
-      resources:
-        requests:
-          storage: 10Gi
