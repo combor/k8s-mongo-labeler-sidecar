@@ -23,12 +23,7 @@ ensure_docker_available() {
   if docker info >/dev/null 2>&1; then
     return
   fi
-
-  if [[ -n "${DOCKER_HOST:-}" ]]; then
-    echo "ERROR: Docker daemon is not reachable via DOCKER_HOST=${DOCKER_HOST}."
-  else
-    echo "ERROR: Docker daemon is not reachable."
-  fi
+  echo "ERROR: Docker daemon is not reachable."
   echo "Verify Docker daemon connectivity with: docker info"
   exit 1
 }
