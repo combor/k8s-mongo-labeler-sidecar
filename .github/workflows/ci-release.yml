@@ -156,8 +156,40 @@ jobs:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
 
-    - name: Pull image from build-and-push job
-      run: docker pull "${{ needs.build-and-push.outputs.image_ref }}"
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Pull platform image from build-and-push job
+      id: integration-image
+      run: |
+        IMAGE_REF="${{ needs.build-and-push.outputs.image_ref }}"
+
+        case "$(uname -m)" in
+          x86_64|amd64)
+            ARCH="amd64"
+            ;;
+          arm64|aarch64)
+            ARCH="arm64"
+            ;;
+          *)
+            echo "ERROR: unsupported runner architecture: $(uname -m)"
+            exit 1
+            ;;
+        esac
+
+        DIGEST="$(docker buildx imagetools inspect --raw "${IMAGE_REF}" | jq -r --arg arch "${ARCH}" '.manifests[] | select(.platform.os == "linux" and .platform.architecture == $arch) | .digest' | head -n1)"
+        if [[ -z "${DIGEST}" || "${DIGEST}" == "null" ]]; then
+          echo "ERROR: failed to resolve linux/${ARCH} digest for ${IMAGE_REF}"
+          exit 1
+        fi
+
+        PLATFORM_IMAGE_REF="${IMAGE_REF%@*}@${DIGEST}"
+        LOCAL_IMAGE="mongo-labeler:ci-${ARCH}"
+
+        docker pull "${PLATFORM_IMAGE_REF}"
+        docker tag "${PLATFORM_IMAGE_REF}" "${LOCAL_IMAGE}"
+
+        echo "labeler_image=${LOCAL_IMAGE}" >> "$GITHUB_OUTPUT"
 
     - name: Set up kubectl
       uses: azure/setup-kubectl@v4
@@ -169,6 +201,6 @@ jobs:
 
     - name: Run integration test
       env:
-        LABELER_IMAGE: ${{ needs.build-and-push.outputs.image_ref }}
+        LABELER_IMAGE: ${{ steps.integration-image.outputs.labeler_image }}
         USE_PREBUILT_IMAGE: "true"
       run: ./test/integration/run.sh
