@@ -1,6 +1,6 @@
 module github.com/combor/k8s-mongo-labeler-sidecar
 
-go 1.25.0
+go 1.25.7
 
 require (
 	github.com/phuslu/log v1.0.121
