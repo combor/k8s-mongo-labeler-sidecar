@@ -46,8 +46,8 @@ data:
       sleep 1
     done
 
-    if ! mongosh --quiet --eval "rs.status().ok" >/dev/null 2>&1; then
-      mongosh --quiet --eval "rs.initiate({_id: 'rs0', members: [{_id: 0, host: 'mongo-0.mongo:27017'}]})"
+    if [[ "${HOSTNAME}" == "mongo-0" ]] && ! mongosh --quiet --eval "rs.status().ok" >/dev/null 2>&1; then
+      mongosh --quiet --eval "rs.initiate({_id: 'rs0', members: [{_id: 0, host: 'mongo-0.mongo:27017'}, {_id: 1, host: 'mongo-1.mongo:27017'}, {_id: 2, host: 'mongo-2.mongo:27017'}]})"
     fi
 
     wait "$mongod_pid"
@@ -70,7 +70,7 @@ metadata:
   name: mongo
 spec:
   serviceName: mongo
-  replicas: 1
+  replicas: 3
   selector:
     matchLabels:
       app: mongo

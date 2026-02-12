@@ -112,14 +112,14 @@ func (l *Labeler) setPrimaryLabel() error {
 }
 
 func primaryLabelPatch(value bool, remove bool) map[string]interface{} {
-	labelValue := interface{}(strconv.FormatBool(value))
+	labelValue := any(strconv.FormatBool(value))
 	if remove {
 		// To remove a label, set it to null in strategic merge patch.
 		labelValue = nil
 	}
-	return map[string]interface{}{
-		"metadata": map[string]interface{}{
-			"labels": map[string]interface{}{
+	return map[string]any{
+		"metadata": map[string]any{
+			"labels": map[string]any{
 				"primary": labelValue,
 			},
 		},

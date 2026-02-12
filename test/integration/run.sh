@@ -77,26 +77,51 @@ kind load docker-image --name "${CLUSTER_NAME}" "${LABELER_IMAGE}"
 echo "Deploying integration stack into default namespace..."
 kubectl apply -f "${ROOT_DIR}/test/integration/stack.yaml"
 kubectl set image statefulset/mongo labeler="${LABELER_IMAGE}"
+kubectl set env statefulset/mongo --containers=labeler LABEL_ALL=true
 kubectl rollout status statefulset/mongo --timeout="${TIMEOUT}"
 
-echo "Waiting for primary label on mongo-0..."
+pods=(mongo-0 mongo-1 mongo-2)
+expected_false_count=$(( ${#pods[@]} - 1 ))
+echo "Waiting for label state: one pod primary=true and others primary=false..."
 deadline="$((SECONDS + 180))"
 while true; do
-  label="$(kubectl get pod mongo-0 -o jsonpath='{.metadata.labels.primary}' 2>/dev/null || true)"
-  if [[ "${label}" == "true" ]]; then
-    echo "PASS: mongo-0 has label primary=true"
+  true_count=0
+  false_count=0
+  other_count=0
+  summary=()
+  for pod in "${pods[@]}"; do
+    label="$(kubectl get pod "${pod}" -o jsonpath='{.metadata.labels.primary}' 2>/dev/null || true)"
+    if [[ "${label}" == "true" ]]; then
+      ((true_count += 1))
+    elif [[ "${label}" == "false" ]]; then
+      ((false_count += 1))
+    else
+      ((other_count += 1))
+    fi
+    if [[ -z "${label}" ]]; then
+      summary+=("${pod}=<unset>")
+    else
+      summary+=("${pod}=${label}")
+    fi
+  done
+
+  if [[ "${true_count}" -eq 1 && "${false_count}" -eq "${expected_false_count}" && "${other_count}" -eq 0 ]]; then
+    echo "PASS: label distribution is correct (${summary[*]})"
     break
   fi
+
   if (( SECONDS >= deadline )); then
-    echo "FAIL: timed out waiting for primary=true label on mongo-0"
-    echo "Labeler logs:"
-    kubectl logs mongo-0 -c labeler || true
-    echo "Mongo logs:"
-    kubectl logs mongo-0 -c mongo || true
+    echo "FAIL: expected 1 true and ${expected_false_count} false labels, got true=${true_count} false=${false_count} other=${other_count} (${summary[*]})"
+    for pod in "${pods[@]}"; do
+      echo "Labeler logs (${pod}):"
+      kubectl logs "${pod}" -c labeler || true
+      echo "Mongo logs (${pod}):"
+      kubectl logs "${pod}" -c mongo || true
+    done
     exit 1
   fi
   sleep 2
 done
 
 echo "Pod labels:"
-kubectl get pod mongo-0 --show-labels
+kubectl get pod -l role=mongo --show-labels
