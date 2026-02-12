@@ -84,10 +84,9 @@ Run:
 
 Optional overrides:
 
-- `NAMESPACE` (default `mongo-it`)
-- `CLUSTER_NAME` (default `mongo-labeler-it`)
-- `LABELER_IMAGE` (default `mongo-labeler-it:local`)
+- `CLUSTER_NAME` (default `kind-mongo-labeler`)
+- `LABELER_IMAGE` (default `mongo-labeler:local`)
 - `TIMEOUT` (default `240s`)
 - `KEEP_CLUSTER=true` (keep cluster for debugging)
 
-The script creates a temporary kind cluster, deploys Mongo + sidecar, and verifies that `mongo-0` receives `primary=true`.
+The script creates a temporary kind cluster, deploys Mongo + sidecar into the default namespace, and verifies that `mongo-0` receives `primary=true`.
