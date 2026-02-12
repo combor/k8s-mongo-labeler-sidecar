@@ -38,6 +38,12 @@ jobs:
     - name: Run Go tests
       run: go test ./...
 
+    - name: Run govulncheck
+      uses: golang/govulncheck-action@v1
+      with:
+        go-version-file: go.mod
+        go-package: ./...
+
   build-and-push:
     name: Build and push image
     runs-on: ubuntu-latest
