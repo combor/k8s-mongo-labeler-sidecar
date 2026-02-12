@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
 	k8stesting "k8s.io/client-go/testing"
 )
@@ -49,6 +50,22 @@ func setConfigEnv(t *testing.T, env map[string]string) {
 			assert.NoError(t, err)
 		}
 	})
+}
+
+func newMongoClientset(namespace string, podNames ...string) *fake.Clientset {
+	objects := make([]runtime.Object, 0, len(podNames))
+	for _, podName := range podNames {
+		objects = append(objects, &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      podName,
+				Namespace: namespace,
+				Labels: map[string]string{
+					"role": "mongo",
+				},
+			},
+		})
+	}
+	return fake.NewClientset(objects...)
 }
 
 func TestGetConfigFromEnvironment(t *testing.T) {
@@ -193,35 +210,7 @@ func TestSetPrimaryLabel_LabelAllVariants(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			k8sClient := fake.NewClientset(
-				&corev1.Pod{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "mongo-0",
-						Namespace: "default",
-						Labels: map[string]string{
-							"role": "mongo",
-						},
-					},
-				},
-				&corev1.Pod{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "mongo-1",
-						Namespace: "default",
-						Labels: map[string]string{
-							"role": "mongo",
-						},
-					},
-				},
-				&corev1.Pod{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "mongo-2",
-						Namespace: "default",
-						Labels: map[string]string{
-							"role": "mongo",
-						},
-					},
-				},
-			)
+			k8sClient := newMongoClientset("default", "mongo-0", "mongo-1", "mongo-2")
 
 			labeler := &Labeler{
 				Config: &Config{
