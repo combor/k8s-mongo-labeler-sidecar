@@ -53,6 +53,7 @@ Single-package Go application (`main.go`, ~314 lines):
 - Preserve secure defaults in manifests/images (non-root, dropped capabilities, readOnlyRootFilesystem, seccomp).
 - Do not hand-edit `dist/` artifacts.
 - Commit messages must explain *why* the change was made, not just what.
+- Do NOT add `Co-Authored-By` trailers to commit messages.
 - Run `go test ./...` before finishing any change; run `./test/integration/run.sh` when changing labeling logic, Kubernetes interactions, manifests, or image behavior.
 
 ## CI
