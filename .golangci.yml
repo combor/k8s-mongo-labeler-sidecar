@@ -12,6 +12,14 @@ linters:
     - ineffassign
     - staticcheck
     - unused
+    - errorlint
+    - gosec
+    - gocritic
+    - testifylint
+    - nilerr
+    - forcetypeassert
+    - contextcheck
+    - nosprintfhostport
 
 issues:
   max-issues-per-linter: 0

@@ -191,7 +191,7 @@ func TestGetConfigFromEnvironment(t *testing.T) {
 			if tt.expectedErrorContains != "" {
 				assert.ErrorContains(t, err, tt.expectedErrorContains)
 			} else {
-				assert.NoError(t, err)
+				require.NoError(t, err)
 				assert.Equal(t, tt.expectedConfig, config)
 			}
 		})
@@ -275,6 +275,6 @@ func TestSetPrimaryLabel_PrimaryResolverError(t *testing.T) {
 
 	err := labeler.setPrimaryLabel()
 	require.Error(t, err)
-	assert.ErrorIs(t, err, primaryErr)
-	assert.Len(t, k8sClient.Actions(), 0)
+	require.ErrorIs(t, err, primaryErr)
+	assert.Empty(t, k8sClient.Actions())
 }
