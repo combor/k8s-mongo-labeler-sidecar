@@ -117,14 +117,9 @@ jobs:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
 
-    - name: Set image coordinates
+    - name: Set integration image ref
       id: image
-      run: |
-        IMAGE_NAME="ghcr.io/${GITHUB_REPOSITORY,,}"
-        IMAGE_TAG="ci-${GITHUB_SHA}"
-        IMAGE_REF="${IMAGE_NAME}:${IMAGE_TAG}"
-        echo "image_ref=${IMAGE_REF}" >> "$GITHUB_OUTPUT"
-        echo "IMAGE_NAME=${IMAGE_NAME}" >> "$GITHUB_ENV"
+      run: echo "image_ref=ghcr.io/${GITHUB_REPOSITORY,,}:sha-${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
 
     - name: Release binaries
       uses: goreleaser/goreleaser-action@v6
@@ -139,20 +134,11 @@ jobs:
       id: meta
       uses: docker/metadata-action@v5
       with:
-        images: ${{ env.IMAGE_NAME }}
+        images: ghcr.io/${{ github.repository }}
         tags: |
-          type=ref,event=branch
           type=ref,event=tag
-          type=sha,prefix=sha-
+          type=sha,prefix=sha-,format=long
           type=raw,value=latest,enable={{is_default_branch}}
-          type=ref,event=branch,suffix=-amd64
-          type=ref,event=tag,suffix=-amd64
-          type=sha,prefix=sha-,suffix=-amd64
-          type=raw,value=latest-amd64,enable={{is_default_branch}}
-          type=ref,event=branch,suffix=-arm64
-          type=ref,event=tag,suffix=-arm64
-          type=sha,prefix=sha-,suffix=-arm64
-          type=raw,value=latest-arm64,enable={{is_default_branch}}
         annotations: |
           org.opencontainers.image.description=Kubernetes sidecar that detects MongoDB replica set primary and labels the pod with primary=true for service selection.
 
@@ -165,12 +151,8 @@ jobs:
         cache-from: type=gha
         cache-to: type=gha,mode=max
         push: true
-        tags: |
-          ${{ steps.meta.outputs.tags }}
-          ${{ steps.image.outputs.image_ref }}
-        labels: |
-          org.opencontainers.image.source=https://github.com/${{ github.repository }}
-          org.opencontainers.image.revision=${{ github.sha }}
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
         annotations: ${{ steps.meta.outputs.annotations }}
 
   integration-test:
