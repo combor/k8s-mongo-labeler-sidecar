@@ -90,3 +90,18 @@ Optional overrides:
 - `KEEP_CLUSTER=true` (keep cluster for debugging)
 
 The script creates a temporary kind cluster, deploys a 3-pod Mongo StatefulSet and verifies that exactly one pod has `primary=true` while non-primary pods have `primary=false`.
+
+## Run CI locally with act
+
+The repository uses a single workflow for GitHub and local runs: `.github/workflows/ci-release.yml`.
+
+Prerequisites:
+
+- Docker Desktop running
+- `act` installed
+
+Run the full workflow locally:
+
+```bash
+act -W .github/workflows/ci-release.yml
+```
