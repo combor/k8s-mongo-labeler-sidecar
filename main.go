@@ -85,17 +85,23 @@ func (l *Labeler) setPrimaryLabel() error {
 	if err != nil {
 		return err
 	}
-	foundPrimary := false
 	phuslog.Debug().Msgf("Found %d pods", len(pods.Items))
+	foundPrimary := false
 	for _, pod := range pods.Items {
-		currentPodIsPrimary := false
-		currentPodName := pod.GetName()
-		if currentPodName == primaryPodName {
-			currentPodIsPrimary = true
+		if pod.GetName() == primaryPodName {
 			foundPrimary = true
-			if pod.Labels["primary"] != "true" {
-				phuslog.Info().Msgf("Setting primary to true for pod %s", primaryPodName)
-			}
+			break
+		}
+	}
+	if !foundPrimary {
+		return fmt.Errorf("primary not found")
+	}
+
+	for _, pod := range pods.Items {
+		currentPodName := pod.GetName()
+		currentPodIsPrimary := currentPodName == primaryPodName
+		if currentPodIsPrimary && pod.Labels["primary"] != "true" {
+			phuslog.Info().Msgf("Setting primary to true for pod %s", primaryPodName)
 		}
 		removePrimaryLabel := !currentPodIsPrimary && !l.Config.LabelAll
 		patchBytes, err := json.Marshal(primaryLabelPatch(currentPodIsPrimary, removePrimaryLabel))
@@ -114,9 +120,6 @@ func (l *Labeler) setPrimaryLabel() error {
 		if err != nil {
 			return err
 		}
-	}
-	if !foundPrimary {
-		return fmt.Errorf("primary not found")
 	}
 	return nil
 }
