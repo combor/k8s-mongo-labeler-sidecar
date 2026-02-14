@@ -263,6 +263,14 @@ func TestSetPrimaryLabel_PrimaryNotFound(t *testing.T) {
 	err := labeler.setPrimaryLabel()
 	require.Error(t, err)
 	assert.ErrorContains(t, err, "primary not found")
+
+	patchActions := 0
+	for _, action := range k8sClient.Actions() {
+		if action.GetVerb() == "patch" && action.GetResource().Resource == "pods" {
+			patchActions++
+		}
+	}
+	assert.Equal(t, 0, patchActions, "should not patch any pods when primary is not found")
 }
 
 func TestSetPrimaryLabel_PrimaryResolverError(t *testing.T) {
