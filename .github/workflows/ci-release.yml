@@ -177,7 +177,7 @@ jobs:
         password: ${{ secrets.GITHUB_TOKEN }}
 
     - name: Pull CI image
-      run: docker pull "${{ needs.build-and-push.outputs.image_ref }}"
+      run: docker pull --platform linux/amd64 "${{ needs.build-and-push.outputs.image_ref }}"
 
     - name: Set up kubectl
       uses: azure/setup-kubectl@v4
