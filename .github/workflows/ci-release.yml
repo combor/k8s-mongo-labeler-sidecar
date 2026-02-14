@@ -78,6 +78,7 @@ jobs:
       uses: golang/govulncheck-action@v1
       with:
         go-package: ./...
+        repo-checkout: false
 
   build-and-push:
     name: Build and push image
