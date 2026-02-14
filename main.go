@@ -66,7 +66,6 @@ func New(config *Config) (*Labeler, error) {
 		Config:    config,
 		K8sClient: k8sClient,
 	}, nil
-
 }
 
 func (l *Labeler) setPrimaryLabel() error {
@@ -284,18 +283,10 @@ func main() {
 	}
 
 	ticker := time.NewTicker(5 * time.Second)
-	tickCh := ticker.C
-	done := make(chan bool)
-	for {
-		select {
-		case <-tickCh:
-			err := labeler.setPrimaryLabel()
-			if err != nil {
-				phuslog.Error().Err(err).Msg("failed to set primary label")
-			}
-		case <-done:
-			phuslog.Info().Msg("Done")
-			return
+	defer ticker.Stop()
+	for range ticker.C {
+		if err := labeler.setPrimaryLabel(); err != nil {
+			phuslog.Error().Err(err).Msg("failed to set primary label")
 		}
 	}
 }
