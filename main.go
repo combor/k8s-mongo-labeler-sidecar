@@ -250,11 +250,7 @@ func (l *Labeler) getMongoPrimary() (string, error) {
 	if primaryHost == "" {
 		if isWritablePrimary, ok := hello["isWritablePrimary"].(bool); ok && isWritablePrimary {
 			primaryHost, _ = hello["me"].(string)
-		}
-	}
-	if primaryHost == "" {
-		// Older MongoDB versions may expose "ismaster" instead of "isWritablePrimary".
-		if isMaster, ok := hello["ismaster"].(bool); ok && isMaster {
+		} else if isMaster, ok := hello["ismaster"].(bool); ok && isMaster {
 			primaryHost, _ = hello["me"].(string)
 		}
 	}
