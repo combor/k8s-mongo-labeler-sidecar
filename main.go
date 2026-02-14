@@ -63,7 +63,7 @@ func New(config *Config) (*Labeler, error) {
 		return nil, err
 	}
 	return &Labeler{
-		Config: config,
+		Config:    config,
 		K8sClient: k8sClient,
 	}, nil
 
@@ -245,17 +245,6 @@ func (l *Labeler) getMongoPrimary() (string, error) {
 	if err != nil {
 		return "", err
 	}
-
-	hostsValue, ok := hello["hosts"]
-	if !ok {
-		return "", fmt.Errorf("no hosts found for replica")
-	}
-
-	hosts, ok := hostsValue.(bson.A)
-	if !ok {
-		return "", fmt.Errorf("invalid hosts type %T", hostsValue)
-	}
-	phuslog.Debug().Msgf("Hosts %v", hosts)
 
 	primaryHost, _ := hello["primary"].(string)
 	if primaryHost == "" {
