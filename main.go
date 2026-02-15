@@ -36,6 +36,7 @@ type Labeler struct {
 	Config          *Config
 	K8sClient       kubernetes.Interface
 	primaryResolver func() (string, error)
+	lastPrimary     string
 }
 
 const defaultK8sRequestTimeout = 10 * time.Second
@@ -105,7 +106,12 @@ func (l *Labeler) setPrimaryLabel() error {
 		currentPodName := pod.GetName()
 		currentPodIsPrimary := currentPodName == primaryPodName
 		if currentPodIsPrimary && pod.Labels["primary"] != "true" {
-			phuslog.Info().Msgf("Setting primary to true for pod %s", primaryPodName)
+			if l.lastPrimary == "" {
+				phuslog.Info().Str("pod", primaryPodName).Msg("primary detected")
+			} else {
+				phuslog.Info().Str("from", l.lastPrimary).Str("to", primaryPodName).Msg("primary changed")
+			}
+			l.lastPrimary = primaryPodName
 		}
 		removePrimaryLabel := !currentPodIsPrimary && !l.Config.LabelAll
 		patchBytes, err := json.Marshal(primaryLabelPatch(currentPodIsPrimary, removePrimaryLabel))
@@ -280,7 +286,14 @@ func main() {
 		phuslog.Fatal().Err(err).Msg("failed to read configuration")
 	}
 	phuslog.DefaultLogger = configureLogger(config.LogLevel)
-	phuslog.Info().Msgf("Setting logging level to %s", config.LogLevel.String())
+	phuslog.Info().
+		Str("namespace", config.Namespace).
+		Str("label_selector", config.LabelSelector).
+		Str("mongo_address", config.Address).
+		Bool("label_all", config.LabelAll).
+		Str("log_level", config.LogLevel.String()).
+		Dur("k8s_request_timeout", config.K8sRequestTimeout).
+		Msg("starting with configuration")
 
 	labeler, err := New(config)
 	if err != nil {
