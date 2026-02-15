@@ -43,7 +43,7 @@ data:
     mongod_pid="$!"
 
     if [[ "${HOSTNAME}" == "mongo-0" ]]; then
-      for host in mongo-0.mongo mongo-1.mongo mongo-2.mongo; do
+      for host in mongo-0.mongo-cluster mongo-1.mongo-cluster mongo-2.mongo-cluster; do
         until mongosh --quiet --host "${host}" --eval "db.adminCommand({ ping: 1 }).ok" >/dev/null 2>&1; do
           sleep 1
         done
@@ -53,9 +53,9 @@ data:
         mongosh --quiet --eval "rs.initiate({
           _id: 'rs0',
           members: [
-            {_id: 0, host: 'mongo-0.mongo:27017'},
-            {_id: 1, host: 'mongo-1.mongo:27017'},
-            {_id: 2, host: 'mongo-2.mongo:27017'}
+            {_id: 0, host: 'mongo-0.mongo-cluster:27017'},
+            {_id: 1, host: 'mongo-1.mongo-cluster:27017'},
+            {_id: 2, host: 'mongo-2.mongo-cluster:27017'}
           ]
         })"
       fi
@@ -66,11 +66,23 @@ data:
 apiVersion: v1
 kind: Service
 metadata:
-  name: mongo
+  name: mongo-cluster
 spec:
   clusterIP: None
   selector:
     role: mongo
+  ports:
+  - name: mongo
+    port: 27017
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mongo
+spec:
+  selector:
+    role: mongo
+    primary: "true"
   ports:
   - name: mongo
     port: 27017
@@ -80,7 +92,7 @@ kind: StatefulSet
 metadata:
   name: mongo
 spec:
-  serviceName: "mongo"
+  serviceName: "mongo-cluster"
   replicas: 3
   selector:
     matchLabels:
