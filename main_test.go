@@ -287,6 +287,18 @@ func TestSetPrimaryLabel_PrimaryResolverError(t *testing.T) {
 	assert.Empty(t, k8sClient.Actions())
 }
 
+func TestSetPrimaryLabel_ListPodsError(t *testing.T) {
+	k8sClient := newMongoClientset("default", "mongo-0")
+	k8sClient.PrependReactor("list", "pods", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, errors.New("forbidden")
+	})
+	labeler := newTestLabeler(k8sClient, false, "mongo-0")
+
+	err := labeler.setPrimaryLabel()
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "forbidden")
+}
+
 func TestSetPrimaryLabel_StopsAfterPatchError(t *testing.T) {
 	k8sClient := newMongoClientset("default", "mongo-0", "mongo-1", "mongo-2")
 	patchErr := errors.New("patch failed for mongo-1")
