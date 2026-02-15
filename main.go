@@ -123,7 +123,7 @@ func (l *Labeler) setPrimaryLabel() error {
 	return nil
 }
 
-func primaryLabelPatch(value bool, remove bool) map[string]interface{} {
+func primaryLabelPatch(value bool, remove bool) map[string]any {
 	labelValue := any(strconv.FormatBool(value))
 	if remove {
 		// To remove a label, set it to null in strategic merge patch.
