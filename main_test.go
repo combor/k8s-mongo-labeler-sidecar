@@ -262,7 +262,7 @@ func TestSetPrimaryLabel_PrimaryNotFound(t *testing.T) {
 
 	err := labeler.setPrimaryLabel()
 	require.Error(t, err)
-	assert.ErrorContains(t, err, "primary not found")
+	require.ErrorContains(t, err, "primary not found")
 
 	patchActions := 0
 	for _, action := range k8sClient.Actions() {
