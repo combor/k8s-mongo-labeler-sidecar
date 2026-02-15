@@ -164,7 +164,7 @@ jobs:
         platforms: linux/amd64
         push: ${{ github.actor != 'nektos/act' }}
         load: ${{ github.actor == 'nektos/act' }}
-        tags: ${{ github.actor == 'nektos/act' && steps.image.outputs.image_ref || format('{0}\n{1}', steps.image.outputs.image_ref, steps.meta.outputs.tags) }}
+        tags: ${{ github.actor == 'nektos/act' && steps.image.outputs.image_ref || steps.meta.outputs.tags }}
         labels: ${{ github.actor != 'nektos/act' && steps.meta.outputs.labels || '' }}
         annotations: ${{ github.actor != 'nektos/act' && steps.meta.outputs.annotations || '' }}
 
