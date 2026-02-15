@@ -1,6 +1,9 @@
 # Kubernetes MongoDB Primary Pod Labeler
 
 [![CI](https://github.com/combor/k8s-mongo-labeler-sidecar/actions/workflows/ci-release.yml/badge.svg)](https://github.com/combor/k8s-mongo-labeler-sidecar/actions/workflows/ci-release.yml)
+[![Release](https://img.shields.io/github/v/release/combor/k8s-mongo-labeler-sidecar?display_name=tag)](https://github.com/combor/k8s-mongo-labeler-sidecar/releases)
+[![License](https://img.shields.io/github/license/combor/k8s-mongo-labeler-sidecar)](https://github.com/combor/k8s-mongo-labeler-sidecar/blob/master/LICENSE)
+[![Coverage](https://codecov.io/gh/combor/k8s-mongo-labeler-sidecar/graph/badge.svg)](https://codecov.io/gh/combor/k8s-mongo-labeler-sidecar)
 
 This sidecar detects the current MongoDB replica set primary and labels Kubernetes pods so services can target the writable node.
 
