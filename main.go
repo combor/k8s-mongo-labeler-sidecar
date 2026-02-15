@@ -63,10 +63,9 @@ func New(config *Config) (*Labeler, error) {
 		return nil, err
 	}
 	return &Labeler{
-		Config: config,
+		Config:    config,
 		K8sClient: k8sClient,
 	}, nil
-
 }
 
 func (l *Labeler) setPrimaryLabel() error {
@@ -85,17 +84,23 @@ func (l *Labeler) setPrimaryLabel() error {
 	if err != nil {
 		return err
 	}
-	foundPrimary := false
 	phuslog.Debug().Msgf("Found %d pods", len(pods.Items))
+	foundPrimary := false
 	for _, pod := range pods.Items {
-		currentPodIsPrimary := false
-		currentPodName := pod.GetName()
-		if currentPodName == primaryPodName {
-			currentPodIsPrimary = true
+		if pod.GetName() == primaryPodName {
 			foundPrimary = true
-			if pod.Labels["primary"] != "true" {
-				phuslog.Info().Msgf("Setting primary to true for pod %s", primaryPodName)
-			}
+			break
+		}
+	}
+	if !foundPrimary {
+		return fmt.Errorf("primary not found")
+	}
+
+	for _, pod := range pods.Items {
+		currentPodName := pod.GetName()
+		currentPodIsPrimary := currentPodName == primaryPodName
+		if currentPodIsPrimary && pod.Labels["primary"] != "true" {
+			phuslog.Info().Msgf("Setting primary to true for pod %s", primaryPodName)
 		}
 		removePrimaryLabel := !currentPodIsPrimary && !l.Config.LabelAll
 		patchBytes, err := json.Marshal(primaryLabelPatch(currentPodIsPrimary, removePrimaryLabel))
@@ -114,9 +119,6 @@ func (l *Labeler) setPrimaryLabel() error {
 		if err != nil {
 			return err
 		}
-	}
-	if !foundPrimary {
-		return fmt.Errorf("primary not found")
 	}
 	return nil
 }
@@ -246,26 +248,11 @@ func (l *Labeler) getMongoPrimary() (string, error) {
 		return "", err
 	}
 
-	hostsValue, ok := hello["hosts"]
-	if !ok {
-		return "", fmt.Errorf("no hosts found for replica")
-	}
-
-	hosts, ok := hostsValue.(bson.A)
-	if !ok {
-		return "", fmt.Errorf("invalid hosts type %T", hostsValue)
-	}
-	phuslog.Debug().Msgf("Hosts %v", hosts)
-
 	primaryHost, _ := hello["primary"].(string)
 	if primaryHost == "" {
 		if isWritablePrimary, ok := hello["isWritablePrimary"].(bool); ok && isWritablePrimary {
 			primaryHost, _ = hello["me"].(string)
-		}
-	}
-	if primaryHost == "" {
-		// Older MongoDB versions may expose "ismaster" instead of "isWritablePrimary".
-		if isMaster, ok := hello["ismaster"].(bool); ok && isMaster {
+		} else if isMaster, ok := hello["ismaster"].(bool); ok && isMaster {
 			primaryHost, _ = hello["me"].(string)
 		}
 	}
@@ -296,18 +283,10 @@ func main() {
 	}
 
 	ticker := time.NewTicker(5 * time.Second)
-	tickCh := ticker.C
-	done := make(chan bool)
-	for {
-		select {
-		case <-tickCh:
-			err := labeler.setPrimaryLabel()
-			if err != nil {
-				phuslog.Error().Err(err).Msg("failed to set primary label")
-			}
-		case <-done:
-			phuslog.Info().Msg("Done")
-			return
+	defer ticker.Stop()
+	for range ticker.C {
+		if err := labeler.setPrimaryLabel(); err != nil {
+			phuslog.Error().Err(err).Msg("failed to set primary label")
 		}
 	}
 }

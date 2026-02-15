@@ -262,7 +262,15 @@ func TestSetPrimaryLabel_PrimaryNotFound(t *testing.T) {
 
 	err := labeler.setPrimaryLabel()
 	require.Error(t, err)
-	assert.ErrorContains(t, err, "primary not found")
+	require.ErrorContains(t, err, "primary not found")
+
+	patchActions := 0
+	for _, action := range k8sClient.Actions() {
+		if action.GetVerb() == "patch" && action.GetResource().Resource == "pods" {
+			patchActions++
+		}
+	}
+	assert.Equal(t, 0, patchActions, "should not patch any pods when primary is not found")
 }
 
 func TestSetPrimaryLabel_PrimaryResolverError(t *testing.T) {
@@ -277,4 +285,38 @@ func TestSetPrimaryLabel_PrimaryResolverError(t *testing.T) {
 	require.Error(t, err)
 	require.ErrorIs(t, err, primaryErr)
 	assert.Empty(t, k8sClient.Actions())
+}
+
+func TestSetPrimaryLabel_StopsAfterPatchError(t *testing.T) {
+	k8sClient := newMongoClientset("default", "mongo-0", "mongo-1", "mongo-2")
+	patchErr := errors.New("patch failed for mongo-1")
+	k8sClient.PrependReactor("patch", "pods", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		patchAction, ok := action.(k8stesting.PatchAction)
+		if !ok {
+			return false, nil, nil
+		}
+		if patchAction.GetName() == "mongo-1" {
+			return true, nil, patchErr
+		}
+		return false, nil, nil
+	})
+
+	labeler := newTestLabeler(k8sClient, true, "mongo-1")
+
+	err := labeler.setPrimaryLabel()
+	require.Error(t, err)
+	require.ErrorIs(t, err, patchErr)
+
+	patchedPods := []string{}
+	for _, action := range k8sClient.Actions() {
+		if action.GetVerb() != "patch" || action.GetResource().Resource != "pods" {
+			continue
+		}
+		patchAction, ok := action.(k8stesting.PatchAction)
+		require.True(t, ok)
+		patchedPods = append(patchedPods, patchAction.GetName())
+	}
+
+	assert.Equal(t, []string{"mongo-0", "mongo-1"}, patchedPods)
+	assert.NotContains(t, patchedPods, "mongo-2")
 }
