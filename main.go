@@ -36,6 +36,7 @@ type Labeler struct {
 	Config          *Config
 	K8sClient       kubernetes.Interface
 	primaryResolver func() (string, error)
+	lastPrimary     string
 }
 
 const defaultK8sRequestTimeout = 10 * time.Second
@@ -75,14 +76,19 @@ func (l *Labeler) setPrimaryLabel() error {
 	}
 	primaryPodName, err := primaryResolver()
 	if err != nil {
-		return err
+		return fmt.Errorf("resolve primary pod name: %w", err)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), l.Config.K8sRequestTimeout)
 	defer cancel()
 	podsClient := l.K8sClient.CoreV1().Pods(l.Config.Namespace)
 	pods, err := podsClient.List(ctx, metav1.ListOptions{LabelSelector: l.Config.LabelSelector})
 	if err != nil {
-		return err
+		return fmt.Errorf(
+			"list pods in namespace %q with selector %q: %w",
+			l.Config.Namespace,
+			l.Config.LabelSelector,
+			err,
+		)
 	}
 	phuslog.Debug().Msgf("Found %d pods", len(pods.Items))
 	foundPrimary := false
@@ -100,12 +106,17 @@ func (l *Labeler) setPrimaryLabel() error {
 		currentPodName := pod.GetName()
 		currentPodIsPrimary := currentPodName == primaryPodName
 		if currentPodIsPrimary && pod.Labels["primary"] != "true" {
-			phuslog.Info().Msgf("Setting primary to true for pod %s", primaryPodName)
+			if l.lastPrimary == "" {
+				phuslog.Info().Str("pod", primaryPodName).Msg("primary detected")
+			} else {
+				phuslog.Info().Str("from", l.lastPrimary).Str("to", primaryPodName).Msg("primary changed")
+			}
+			l.lastPrimary = primaryPodName
 		}
 		removePrimaryLabel := !currentPodIsPrimary && !l.Config.LabelAll
 		patchBytes, err := json.Marshal(primaryLabelPatch(currentPodIsPrimary, removePrimaryLabel))
 		if err != nil {
-			return err
+			return fmt.Errorf("marshal primary label patch for pod %q: %w", currentPodName, err)
 		}
 
 		phuslog.Debug().Msgf("Patching pod %s with: %s", currentPodName, string(patchBytes))
@@ -117,7 +128,7 @@ func (l *Labeler) setPrimaryLabel() error {
 			metav1.PatchOptions{},
 		)
 		if err != nil {
-			return err
+			return fmt.Errorf("patch pod %q primary label: %w", currentPodName, err)
 		}
 	}
 	return nil
@@ -228,7 +239,7 @@ func (l *Labeler) getMongoPrimary() (string, error) {
 		SetDirect(true)
 	client, err := mongo.Connect(clientOptions)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("connect to mongo at %q: %w", l.Config.Address, err)
 	}
 	defer func() {
 		err := client.Disconnect(ctx)
@@ -237,7 +248,7 @@ func (l *Labeler) getMongoPrimary() (string, error) {
 		}
 	}()
 	if err = client.Ping(ctx, nil); err != nil {
-		return "", err
+		return "", fmt.Errorf("ping mongo at %q: %w", l.Config.Address, err)
 	}
 
 	var hello bson.M
@@ -245,7 +256,7 @@ func (l *Labeler) getMongoPrimary() (string, error) {
 		RunCommand(ctx, bson.D{{Key: "hello", Value: 1}}).
 		Decode(&hello)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("run hello command on mongo at %q: %w", l.Config.Address, err)
 	}
 
 	primaryHost, _ := hello["primary"].(string)
@@ -275,7 +286,14 @@ func main() {
 		phuslog.Fatal().Err(err).Msg("failed to read configuration")
 	}
 	phuslog.DefaultLogger = configureLogger(config.LogLevel)
-	phuslog.Info().Msgf("Setting logging level to %s", config.LogLevel.String())
+	phuslog.Info().
+		Str("namespace", config.Namespace).
+		Str("label_selector", config.LabelSelector).
+		Str("mongo_address", config.Address).
+		Bool("label_all", config.LabelAll).
+		Str("log_level", config.LogLevel.String()).
+		Dur("k8s_request_timeout", config.K8sRequestTimeout).
+		Msg("starting with configuration")
 
 	labeler, err := New(config)
 	if err != nil {

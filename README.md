@@ -75,9 +75,11 @@ The repository includes an end-to-end test environment in `test/integration`.
 
 Prerequisites:
 
-- `kind`
-- `kubectl`
-- Docker with BuildKit/Buildx enabled
+- [kind](https://kind.sigs.k8s.io/)
+- [kubectl](https://kubernetes.io/docs/reference/kubectl/)
+- [Docker](https://www.docker.com/)
+- [BuildKit](https://github.com/moby/buildkit)
+- [Buildx](https://github.com/docker/buildx)
 
 Run:
 
@@ -101,8 +103,8 @@ The repository uses a single workflow for GitHub and local runs: `.github/workfl
 
 Prerequisites:
 
-- Docker Desktop running
-- `act` installed
+- [Docker Desktop](https://www.docker.com/products/docker-desktop/)
+- [act](https://github.com/nektos/act)
 
 Run the full workflow locally:
 
