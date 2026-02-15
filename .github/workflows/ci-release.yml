@@ -80,18 +80,14 @@ jobs:
         go-package: ./...
         repo-checkout: false
 
-  build-and-push:
-    name: Build and push image
+  release:
+    name: Release binaries
     runs-on: ubuntu-latest
     needs: [lint, test, govulncheck]
     if: (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')) || github.actor == 'nektos/act'
-    timeout-minutes: 35
+    timeout-minutes: 20
     permissions:
-      actions: write
       contents: write
-      packages: write
-    outputs:
-      image_ref: ${{ steps.image.outputs.image_ref }}
 
     steps:
     - name: Checkout repository
@@ -104,7 +100,60 @@ jobs:
       with:
         go-version-file: go.mod
 
+    - name: Release binaries
+      if: github.actor != 'nektos/act'
+      uses: goreleaser/goreleaser-action@v6
+      with:
+        distribution: goreleaser
+        version: "~> v2"
+        args: release --clean
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  build-and-push:
+    name: Build ${{ matrix.arch }} image
+    runs-on: ubuntu-latest
+    needs: release
+    if: (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')) || github.actor == 'nektos/act'
+    timeout-minutes: 20
+    strategy:
+      matrix:
+        arch: [amd64, arm64]
+    permissions:
+      actions: write
+      contents: read
+      packages: write
+    outputs:
+      image_ref: ${{ steps.image.outputs.image_ref }}
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v6
+
+    - name: Set up Go
+      if: github.actor == 'nektos/act'
+      uses: actions/setup-go@v6
+      with:
+        go-version-file: go.mod
+
+    - name: Build release binary (local)
+      if: github.actor == 'nektos/act'
+      run: |
+        mkdir -p dist
+        CGO_ENABLED=0 GOOS=linux GOARCH=${{ matrix.arch }} go build -o "dist/k8s-mongo-labeler-sidecar-linux-${{ matrix.arch }}" ./
+
+    - name: Download release binary
+      if: github.actor != 'nektos/act'
+      run: |
+        mkdir -p dist
+        TAG="${GITHUB_REF#refs/tags/}"
+        gh release download "${TAG}" --pattern "k8s-mongo-labeler-sidecar_*_linux_${{ matrix.arch }}.tar.gz" --dir /tmp
+        tar -xzf /tmp/k8s-mongo-labeler-sidecar_*_linux_${{ matrix.arch }}.tar.gz -C dist/
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
     - name: Set up QEMU
+      if: matrix.arch != 'amd64'
       uses: docker/setup-qemu-action@v3
 
     - name: Set up Docker Buildx
@@ -124,25 +173,8 @@ jobs:
         if [[ "${GITHUB_ACTOR}" == "nektos/act" ]]; then
           echo "image_ref=mongo-labeler:ci-local" >> "$GITHUB_OUTPUT"
         else
-          echo "image_ref=ghcr.io/${GITHUB_REPOSITORY,,}:sha-${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+          echo "image_ref=ghcr.io/${GITHUB_REPOSITORY,,}:sha-${GITHUB_SHA}-amd64" >> "$GITHUB_OUTPUT"
         fi
-
-    - name: Build release binary for local image
-      if: github.actor == 'nektos/act'
-      run: |
-        mkdir -p dist
-        CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o "dist/k8s-mongo-labeler-sidecar-linux-amd64" ./
-        CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o "dist/k8s-mongo-labeler-sidecar-linux-arm64" ./
-
-    - name: Release binaries
-      if: github.actor != 'nektos/act'
-      uses: goreleaser/goreleaser-action@v6
-      with:
-        distribution: goreleaser
-        version: "~> v2"
-        args: release --clean
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
     - name: Extract Docker metadata
       if: github.actor != 'nektos/act'
@@ -151,9 +183,8 @@ jobs:
       with:
         images: ghcr.io/${{ github.repository }}
         tags: |
-          type=ref,event=tag
-          type=sha,prefix=sha-,format=long
-          type=raw,value=latest,enable={{is_default_branch}}
+          type=ref,event=tag,suffix=-${{ matrix.arch }}
+          type=sha,prefix=sha-,format=long,suffix=-${{ matrix.arch }}
         annotations: |
           org.opencontainers.image.description=Kubernetes sidecar that detects MongoDB replica set primary and labels the pod with primary=true for service selection.
 
@@ -162,12 +193,43 @@ jobs:
       with:
         context: .
         file: ./Dockerfile.dist
-        platforms: linux/amd64,linux/arm64
+        platforms: linux/${{ matrix.arch }}
         push: ${{ github.actor != 'nektos/act' }}
-        load: ${{ github.actor == 'nektos/act' }}
+        load: ${{ github.actor == 'nektos/act' && matrix.arch == 'amd64' }}
         tags: ${{ github.actor == 'nektos/act' && steps.image.outputs.image_ref || steps.meta.outputs.tags }}
         labels: ${{ github.actor != 'nektos/act' && steps.meta.outputs.labels || '' }}
         annotations: ${{ github.actor != 'nektos/act' && steps.meta.outputs.annotations || '' }}
+
+  manifest:
+    name: Create manifest list
+    runs-on: ubuntu-latest
+    needs: build-and-push
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+    timeout-minutes: 10
+    permissions:
+      packages: write
+
+    steps:
+    - name: Log in to GitHub Container Registry
+      uses: docker/login-action@v3
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Create manifest lists
+      run: |
+        IMAGE="ghcr.io/${GITHUB_REPOSITORY,,}"
+        SHA="sha-${GITHUB_SHA}"
+        TAG="${GITHUB_REF#refs/tags/}"
+
+        # Create :sha-<commit> manifest
+        docker buildx imagetools create -t "${IMAGE}:${SHA}" \
+          "${IMAGE}:${SHA}-amd64" "${IMAGE}:${SHA}-arm64"
+
+        # Create :<tag> manifest
+        docker buildx imagetools create -t "${IMAGE}:${TAG}" \
+          "${IMAGE}:${TAG}-amd64" "${IMAGE}:${TAG}-arm64"
 
   integration-test:
     name: Integration test
