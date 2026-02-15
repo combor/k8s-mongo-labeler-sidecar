@@ -119,7 +119,7 @@ kubectl get pod -l role=mongo --show-labels
 
 echo "Verifying mongo service routes to primary pod..."
 primary_pod_ip="$(kubectl get pod -l role=mongo,primary=true -o jsonpath='{.items[0].status.podIP}')"
-endpoint_ips="$(kubectl get endpoints mongo -o jsonpath='{.subsets[0].addresses[*].ip}')"
+endpoint_ips="$(kubectl get endpointslices -l kubernetes.io/service-name=mongo -o jsonpath='{.items[0].endpoints[0].addresses[0]}')"
 
 if [[ "${endpoint_ips}" == "${primary_pod_ip}" ]]; then
   echo "PASS: mongo service routes to primary pod (${endpoint_ips})"
