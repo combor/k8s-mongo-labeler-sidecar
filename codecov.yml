@@ -1,0 +1,7 @@
+coverage:
+  status:
+    project:
+      default:
+        target: auto
+comment:
+  layout: "reach,diff,flags,files"
