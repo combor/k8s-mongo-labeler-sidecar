@@ -22,15 +22,14 @@ It uses Kubernetes `Patch` (strategic merge), not full-object `Update`.
 apiVersion: v1
 kind: Service
 metadata:
-  name: mongo-external
+  name: mongo
 spec:
-  type: LoadBalancer
-  ports:
-  - name: mongo
-    port: 27017
   selector:
     role: mongo
     primary: "true"
+  ports:
+  - name: mongo
+    port: 27017
 ```
 
 ## Configuration
@@ -58,8 +57,7 @@ Container images are published to GHCR at:
 `ghcr.io/combor/k8s-mongo-labeler-sidecar`
 
 ```bash
-docker pull ghcr.io/combor/k8s-mongo-labeler-sidecar:latest-amd64
-docker pull ghcr.io/combor/k8s-mongo-labeler-sidecar:latest-arm64
+docker pull ghcr.io/combor/k8s-mongo-labeler-sidecar:0.5.12
 ```
 
 ## Deployment
@@ -86,10 +84,11 @@ Optional overrides:
 
 - `CLUSTER_NAME` (default `kind-mongo-labeler`)
 - `LABELER_IMAGE` (default `mongo-labeler:local`)
+- `USE_PREBUILT_IMAGE` (default `false`) — skip building and use an existing image
 - `TIMEOUT` (default `240s`)
 - `KEEP_CLUSTER=true` (keep cluster for debugging)
 
-The script creates a temporary kind cluster, deploys a 3-pod Mongo StatefulSet and verifies that exactly one pod has `primary=true` while non-primary pods have `primary=false`.
+The script creates a temporary kind cluster, deploys a 3-pod Mongo StatefulSet and verifies that exactly one pod has `primary=true` while non-primary pods have `primary=false`. It also verifies that the `mongo` Service routes to the primary pod via EndpointSlice.
 
 ## Run CI locally with act
 
