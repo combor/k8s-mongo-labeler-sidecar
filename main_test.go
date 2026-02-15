@@ -284,6 +284,7 @@ func TestSetPrimaryLabel_PrimaryResolverError(t *testing.T) {
 	err := labeler.setPrimaryLabel()
 	require.Error(t, err)
 	require.ErrorIs(t, err, primaryErr)
+	require.ErrorContains(t, err, "resolve primary pod name")
 	assert.Empty(t, k8sClient.Actions())
 }
 
@@ -296,6 +297,7 @@ func TestSetPrimaryLabel_ListPodsError(t *testing.T) {
 
 	err := labeler.setPrimaryLabel()
 	require.Error(t, err)
+	assert.ErrorContains(t, err, "list pods in namespace")
 	assert.ErrorContains(t, err, "forbidden")
 }
 
@@ -318,6 +320,7 @@ func TestSetPrimaryLabel_StopsAfterPatchError(t *testing.T) {
 	err := labeler.setPrimaryLabel()
 	require.Error(t, err)
 	require.ErrorIs(t, err, patchErr)
+	require.ErrorContains(t, err, "patch pod \"mongo-1\" primary label")
 
 	patchedPods := []string{}
 	for _, action := range k8sClient.Actions() {

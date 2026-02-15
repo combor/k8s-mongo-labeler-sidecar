@@ -75,14 +75,19 @@ func (l *Labeler) setPrimaryLabel() error {
 	}
 	primaryPodName, err := primaryResolver()
 	if err != nil {
-		return err
+		return fmt.Errorf("resolve primary pod name: %w", err)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), l.Config.K8sRequestTimeout)
 	defer cancel()
 	podsClient := l.K8sClient.CoreV1().Pods(l.Config.Namespace)
 	pods, err := podsClient.List(ctx, metav1.ListOptions{LabelSelector: l.Config.LabelSelector})
 	if err != nil {
-		return err
+		return fmt.Errorf(
+			"list pods in namespace %q with selector %q: %w",
+			l.Config.Namespace,
+			l.Config.LabelSelector,
+			err,
+		)
 	}
 	phuslog.Debug().Msgf("Found %d pods", len(pods.Items))
 	foundPrimary := false
@@ -105,7 +110,7 @@ func (l *Labeler) setPrimaryLabel() error {
 		removePrimaryLabel := !currentPodIsPrimary && !l.Config.LabelAll
 		patchBytes, err := json.Marshal(primaryLabelPatch(currentPodIsPrimary, removePrimaryLabel))
 		if err != nil {
-			return err
+			return fmt.Errorf("marshal primary label patch for pod %q: %w", currentPodName, err)
 		}
 
 		phuslog.Debug().Msgf("Patching pod %s with: %s", currentPodName, string(patchBytes))
@@ -117,7 +122,7 @@ func (l *Labeler) setPrimaryLabel() error {
 			metav1.PatchOptions{},
 		)
 		if err != nil {
-			return err
+			return fmt.Errorf("patch pod %q primary label: %w", currentPodName, err)
 		}
 	}
 	return nil
@@ -228,7 +233,7 @@ func (l *Labeler) getMongoPrimary() (string, error) {
 		SetDirect(true)
 	client, err := mongo.Connect(clientOptions)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("connect to mongo at %q: %w", l.Config.Address, err)
 	}
 	defer func() {
 		err := client.Disconnect(ctx)
@@ -237,7 +242,7 @@ func (l *Labeler) getMongoPrimary() (string, error) {
 		}
 	}()
 	if err = client.Ping(ctx, nil); err != nil {
-		return "", err
+		return "", fmt.Errorf("ping mongo at %q: %w", l.Config.Address, err)
 	}
 
 	var hello bson.M
@@ -245,7 +250,7 @@ func (l *Labeler) getMongoPrimary() (string, error) {
 		RunCommand(ctx, bson.D{{Key: "hello", Value: 1}}).
 		Decode(&hello)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("run hello command on mongo at %q: %w", l.Config.Address, err)
 	}
 
 	primaryHost, _ := hello["primary"].(string)
