@@ -297,8 +297,8 @@ func TestSetPrimaryLabel_ListPodsError(t *testing.T) {
 
 	err := labeler.setPrimaryLabel()
 	require.Error(t, err)
-	assert.ErrorContains(t, err, "list pods in namespace")
-	assert.ErrorContains(t, err, "forbidden")
+	require.ErrorContains(t, err, "list pods in namespace")
+	require.ErrorContains(t, err, "forbidden")
 }
 
 func TestSetPrimaryLabel_StopsAfterPatchError(t *testing.T) {
