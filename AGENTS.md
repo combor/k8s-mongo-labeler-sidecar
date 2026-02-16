@@ -44,7 +44,8 @@ This repository builds `k8s-mongo-labeler-sidecar`, a Go sidecar that detects th
 From the repo root, before finishing a change:
 
 1. Run unit tests: `go test ./...`
-2. When changing labeling logic, Kubernetes interactions, manifests, or image behavior, also run the integration test: `./test/integration/run.sh`
+2. Run linter: `golangci-lint run --timeout=10m`
+3. When changing labeling logic, Kubernetes interactions, manifests, or image behavior, also run the integration test: `./test/integration/run.sh`
 
 ## CI awareness
 
