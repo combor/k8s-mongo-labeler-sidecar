@@ -109,7 +109,7 @@ spec:
           type: RuntimeDefault
       containers:
       - name: mongo
-        image: mongo:7.0
+        image: mongo:8.0.19
         command: ["/bin/bash", "/scripts/start-mongo.sh"]
         ports:
         - containerPort: 27017
@@ -121,7 +121,7 @@ spec:
           readOnly: true
       # Mongo labeler sidecar
       - name: labeler
-        image: ghcr.io/combor/k8s-mongo-labeler-sidecar:0.5.12
+        image: ghcr.io/combor/k8s-mongo-labeler-sidecar:0.6.2
         env:
         - name: LABEL_SELECTOR
           value: "role=mongo"

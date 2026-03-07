@@ -62,7 +62,7 @@ Container images are published to GHCR at:
 `ghcr.io/combor/k8s-mongo-labeler-sidecar`
 
 ```bash
-docker pull ghcr.io/combor/k8s-mongo-labeler-sidecar:0.5.12
+docker pull ghcr.io/combor/k8s-mongo-labeler-sidecar:0.6.2
 ```
 
 ## Deployment

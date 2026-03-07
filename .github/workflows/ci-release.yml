@@ -26,7 +26,7 @@ jobs:
 
     steps:
     - name: Checkout repository
-      uses: actions/checkout@v6
+      uses: actions/checkout@v6.0.2
 
     - name: Set up Go
       uses: actions/setup-go@v6.3.0
@@ -34,9 +34,9 @@ jobs:
         go-version-file: go.mod
 
     - name: Run golangci-lint
-      uses: golangci/golangci-lint-action@v9
+      uses: golangci/golangci-lint-action@v9.2.0
       with:
-        version: v2.9.0
+        version: v2.11.1
         args: --timeout=10m
 
   test-coverage:
@@ -48,7 +48,7 @@ jobs:
 
     steps:
     - name: Checkout repository
-      uses: actions/checkout@v6
+      uses: actions/checkout@v6.0.2
 
     - name: Set up Go
       uses: actions/setup-go@v6.3.0
@@ -59,7 +59,7 @@ jobs:
       run: go test -coverprofile=coverage.out -covermode=atomic ./...
 
     - name: Upload to Codecov
-      uses: codecov/codecov-action@v5
+      uses: codecov/codecov-action@v5.5.2
       with:
         files: coverage.out
         token: ${{ secrets.CODECOV_TOKEN }}
@@ -73,7 +73,7 @@ jobs:
 
     steps:
     - name: Checkout repository
-      uses: actions/checkout@v6
+      uses: actions/checkout@v6.0.2
 
     - name: Set up Go
       uses: actions/setup-go@v6.3.0
@@ -81,7 +81,7 @@ jobs:
         go-version-file: go.mod
 
     - name: Run govulncheck
-      uses: golang/govulncheck-action@v1
+      uses: golang/govulncheck-action@v1.0.4
       with:
         go-package: ./...
         repo-checkout: false
@@ -97,7 +97,7 @@ jobs:
 
     steps:
     - name: Checkout repository
-      uses: actions/checkout@v6
+      uses: actions/checkout@v6.0.2
       with:
         fetch-depth: 0
 
@@ -108,7 +108,7 @@ jobs:
 
     - name: Release binaries
       if: github.actor != 'nektos/act'
-      uses: goreleaser/goreleaser-action@v7
+      uses: goreleaser/goreleaser-action@v7.0.0
       with:
         distribution: goreleaser
         version: "~> v2"
@@ -134,7 +134,7 @@ jobs:
 
     steps:
     - name: Checkout repository
-      uses: actions/checkout@v6
+      uses: actions/checkout@v6.0.2
 
     - name: Set up Go
       if: github.actor == 'nektos/act'
@@ -160,14 +160,14 @@ jobs:
 
     - name: Set up QEMU
       if: matrix.arch != 'amd64'
-      uses: docker/setup-qemu-action@v3
+      uses: docker/setup-qemu-action@v4.0.0
 
     - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v3
+      uses: docker/setup-buildx-action@v4.0.0
 
     - name: Log in to GitHub Container Registry
       if: github.actor != 'nektos/act'
-      uses: docker/login-action@v3
+      uses: docker/login-action@v4.0.0
       with:
         registry: ghcr.io
         username: ${{ github.actor }}
@@ -185,7 +185,7 @@ jobs:
     - name: Extract Docker metadata
       if: github.actor != 'nektos/act'
       id: meta
-      uses: docker/metadata-action@v5
+      uses: docker/metadata-action@v6.0.0
       with:
         images: ghcr.io/${{ github.repository }}
         tags: |
@@ -195,7 +195,7 @@ jobs:
           org.opencontainers.image.description=Kubernetes sidecar that detects MongoDB replica set primary and labels the pod with primary=true for service selection.
 
     - name: Build Docker image
-      uses: docker/build-push-action@v6
+      uses: docker/build-push-action@v7.0.0
       with:
         context: .
         file: ./Dockerfile.dist
@@ -217,7 +217,7 @@ jobs:
 
     steps:
     - name: Log in to GitHub Container Registry
-      uses: docker/login-action@v3
+      uses: docker/login-action@v4.0.0
       with:
         registry: ghcr.io
         username: ${{ github.actor }}
@@ -249,11 +249,11 @@ jobs:
 
     steps:
     - name: Checkout repository
-      uses: actions/checkout@v6
+      uses: actions/checkout@v6.0.2
 
     - name: Log in to GitHub Container Registry
       if: github.actor != 'nektos/act'
-      uses: docker/login-action@v3
+      uses: docker/login-action@v4.0.0
       with:
         registry: ghcr.io
         username: ${{ github.actor }}
@@ -264,10 +264,10 @@ jobs:
       run: docker pull "${{ needs.build-and-push.outputs.image_ref }}"
 
     - name: Set up kubectl
-      uses: azure/setup-kubectl@v4
+      uses: azure/setup-kubectl@v4.0.1
 
     - name: Set up kind
-      uses: helm/kind-action@v1
+      uses: helm/kind-action@v1.14.0
       with:
         cluster_name: kind-mongo-labeler
         version: v0.31.0
