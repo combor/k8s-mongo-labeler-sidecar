@@ -264,7 +264,7 @@ jobs:
       run: docker pull "${{ needs.build-and-push.outputs.image_ref }}"
 
     - name: Set up kubectl
-      uses: azure/setup-kubectl@v4.0.1
+      uses: azure/setup-kubectl@v5.0.0
 
     - name: Set up kind
       uses: helm/kind-action@v1.14.0
