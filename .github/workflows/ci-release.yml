@@ -195,7 +195,7 @@ jobs:
           org.opencontainers.image.description=Kubernetes sidecar that detects MongoDB replica set primary and labels the pod with primary=true for service selection.
 
     - name: Build Docker image
-      uses: docker/build-push-action@v7.0.0
+      uses: docker/build-push-action@v7.1.0
       with:
         context: .
         file: ./Dockerfile.dist
