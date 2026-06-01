@@ -136,26 +136,19 @@ jobs:
       uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
     - name: Set up Go
-      if: github.actor == 'nektos/act'
       uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
       with:
         go-version-file: go.mod
 
-    - name: Build release binary (local)
-      if: github.actor == 'nektos/act'
+    # Build the image binary from the checked-out source so the published image
+    # always matches this commit, instead of re-downloading a release asset that
+    # could drift from the tagged SHA.
+    - name: Build release binary from source
       run: |
         mkdir -p dist
-        CGO_ENABLED=0 GOOS=linux GOARCH=${{ matrix.arch }} go build -o "dist/k8s-mongo-labeler-sidecar-linux-${{ matrix.arch }}" ./
-
-    - name: Download release binary
-      if: github.actor != 'nektos/act'
-      run: |
-        mkdir -p dist
-        TAG="${GITHUB_REF#refs/tags/}"
-        gh release download "${TAG}" --pattern "k8s-mongo-labeler-sidecar_*_linux_${{ matrix.arch }}.tar.gz" --dir /tmp
-        tar -xzf /tmp/k8s-mongo-labeler-sidecar_*_linux_${{ matrix.arch }}.tar.gz -C dist/
-      env:
-        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        CGO_ENABLED=0 GOOS=linux GOARCH=${{ matrix.arch }} \
+          go build -trimpath -ldflags="-s -w" \
+          -o "dist/k8s-mongo-labeler-sidecar-linux-${{ matrix.arch }}" ./
 
     - name: Set up QEMU
       if: matrix.arch != 'amd64'

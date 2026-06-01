@@ -39,6 +39,7 @@ type Labeler struct {
 	Config          *Config
 	K8sClient       kubernetes.Interface
 	primaryResolver func() (string, error)
+	helloFetcher    func(ctx context.Context) (bson.M, error)
 	lastPrimary     string
 	mongoClient     *mongo.Client
 }
@@ -129,14 +130,20 @@ func (l *Labeler) setPrimaryLabel() error {
 		if alreadyDesired {
 			continue
 		}
-		if err := l.patchPrimaryLabel(podName, false, removePrimaryLabel); err != nil {
+
+		// LABEL_ALL=false removes the label (nil); otherwise demote to "false".
+		var desired any
+		if !removePrimaryLabel {
+			desired = "false"
+		}
+		if err := l.patchPrimaryLabel(podName, desired); err != nil {
 			return err
 		}
 	}
 
 	// Promote the primary last, and only if it is not already labelled.
 	if !primaryAlreadyTrue {
-		if err := l.patchPrimaryLabel(primaryPodName, true, false); err != nil {
+		if err := l.patchPrimaryLabel(primaryPodName, "true"); err != nil {
 			return err
 		}
 	}
@@ -155,11 +162,12 @@ func (l *Labeler) setPrimaryLabel() error {
 	return nil
 }
 
-// patchPrimaryLabel applies a strategic-merge patch to a single pod's "primary"
-// label using a fresh per-call timeout, so each request has an independent
-// deadline rather than sharing one budget across the whole reconcile.
-func (l *Labeler) patchPrimaryLabel(podName string, isPrimary, remove bool) error {
-	patchBytes, err := json.Marshal(primaryLabelPatch(isPrimary, remove))
+// patchPrimaryLabel applies a strategic-merge patch that sets pod's "primary"
+// label to the given value (or removes it when label is nil), using a fresh
+// per-call timeout so each request has an independent deadline rather than
+// sharing one budget across the whole reconcile.
+func (l *Labeler) patchPrimaryLabel(podName string, label any) error {
+	patchBytes, err := json.Marshal(primaryLabelPatch(label))
 	if err != nil {
 		return fmt.Errorf("marshal primary label patch for pod %q: %w", podName, err)
 	}
@@ -181,67 +189,87 @@ func (l *Labeler) patchPrimaryLabel(podName string, isPrimary, remove bool) erro
 	return nil
 }
 
-func primaryLabelPatch(value bool, remove bool) map[string]any {
-	labelValue := any(strconv.FormatBool(value))
-	if remove {
-		// To remove a label, set it to null in strategic merge patch.
-		labelValue = nil
-	}
+// primaryLabelPatch builds a strategic-merge patch that sets the "primary" label
+// to the given value, or removes it (null patch) when label is nil.
+func primaryLabelPatch(label any) map[string]any {
 	return map[string]any{
 		"metadata": map[string]any{
 			"labels": map[string]any{
-				"primary": labelValue,
+				"primary": label,
 			},
 		},
 	}
 }
 
 func getConfigFromEnvironment() (*Config, error) {
-	var l string
-	var ok bool
-	if l, ok = os.LookupEnv("LABEL_SELECTOR"); !ok {
+	labelSelector, ok := os.LookupEnv("LABEL_SELECTOR")
+	if !ok {
 		return nil, fmt.Errorf("please export LABEL_SELECTOR")
 	}
 
 	config := &Config{
-		LabelSelector:     l,
-		Namespace:         "default",
-		Address:           "localhost:27017",
-		LabelAll:          false,
+		LabelSelector:     labelSelector,
+		Namespace:         envString("NAMESPACE", "default"),
+		Address:           envString("MONGO_ADDRESS", "localhost:27017"),
 		LogLevel:          phuslog.InfoLevel,
 		K8sRequestTimeout: defaultK8sRequestTimeout,
 	}
 
-	if l, ok = os.LookupEnv("NAMESPACE"); ok {
-		config.Namespace = l
+	labelAll, err := envBool("LABEL_ALL", false)
+	if err != nil {
+		return nil, err
 	}
-	if l, ok = os.LookupEnv("MONGO_ADDRESS"); ok {
-		config.Address = l
+	config.LabelAll = labelAll
+
+	debug, err := envBool("DEBUG", false)
+	if err != nil {
+		return nil, err
 	}
-	if l, ok = os.LookupEnv("LABEL_ALL"); ok {
-		parsed, err := strconv.ParseBool(l)
-		if err != nil {
-			return nil, fmt.Errorf("invalid LABEL_ALL value %q: %w", l, err)
-		}
-		config.LabelAll = parsed
+	if debug {
+		config.LogLevel = phuslog.DebugLevel
 	}
-	if l, ok = os.LookupEnv("DEBUG"); ok {
-		parsed, err := strconv.ParseBool(l)
-		if err != nil {
-			return nil, fmt.Errorf("invalid DEBUG value %q: %w", l, err)
-		}
-		if parsed {
-			config.LogLevel = phuslog.DebugLevel
-		}
+
+	timeout, err := envDuration("K8S_REQUEST_TIMEOUT", defaultK8sRequestTimeout)
+	if err != nil {
+		return nil, err
 	}
-	if l, ok = os.LookupEnv("K8S_REQUEST_TIMEOUT"); ok {
-		parsed, err := time.ParseDuration(l)
-		if err != nil {
-			return nil, fmt.Errorf("invalid K8S_REQUEST_TIMEOUT value %q: %w", l, err)
-		}
-		config.K8sRequestTimeout = parsed
-	}
+	config.K8sRequestTimeout = timeout
+
 	return config, nil
+}
+
+// envString returns the value of the environment variable key, or def if unset.
+func envString(key, def string) string {
+	if v, ok := os.LookupEnv(key); ok {
+		return v
+	}
+	return def
+}
+
+// envBool parses a boolean environment variable, returning def if unset.
+func envBool(key string, def bool) (bool, error) {
+	v, ok := os.LookupEnv(key)
+	if !ok {
+		return def, nil
+	}
+	parsed, err := strconv.ParseBool(v)
+	if err != nil {
+		return false, fmt.Errorf("invalid %s value %q: %w", key, v, err)
+	}
+	return parsed, nil
+}
+
+// envDuration parses a Go duration environment variable, returning def if unset.
+func envDuration(key string, def time.Duration) (time.Duration, error) {
+	v, ok := os.LookupEnv(key)
+	if !ok {
+		return def, nil
+	}
+	parsed, err := time.ParseDuration(v)
+	if err != nil {
+		return 0, fmt.Errorf("invalid %s value %q: %w", key, v, err)
+	}
+	return parsed, nil
 }
 
 func getKubeClientSet() (*kubernetes.Clientset, error) {
@@ -293,11 +321,31 @@ func homeDir() string {
 	return os.Getenv("USERPROFILE") // windows
 }
 
-// getMongoPrimary resolves the primary pod name from MongoDB. It lazily connects
-// a single long-lived client on first use and reuses it on every subsequent tick.
-// The mongo-driver Client is concurrency-safe and maintains its own connection
-// pool, so connecting/disconnecting on every tick is wasteful.
+// getMongoPrimary resolves the primary pod name from MongoDB by fetching the
+// "hello" command response and parsing it. The fetch step is pluggable via
+// helloFetcher (defaulting to fetchHello) so the parsing/orchestration can be
+// tested without a live MongoDB.
 func (l *Labeler) getMongoPrimary() (string, error) {
+	fetch := l.helloFetcher
+	if fetch == nil {
+		fetch = l.fetchHello
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), mongoCommandTimeout)
+	defer cancel()
+
+	hello, err := fetch(ctx)
+	if err != nil {
+		return "", err
+	}
+	return parsePrimaryPodName(hello)
+}
+
+// fetchHello lazily connects a single long-lived MongoDB client on first use and
+// reuses it on every subsequent tick (the mongo-driver Client is concurrency-safe
+// and pools connections, so reconnecting each tick is wasteful), then returns the
+// decoded "hello" command response.
+func (l *Labeler) fetchHello(ctx context.Context) (bson.M, error) {
 	if l.mongoClient == nil {
 		clientOptions := options.Client().
 			ApplyURI("mongodb://" + l.Config.Address).
@@ -306,26 +354,22 @@ func (l *Labeler) getMongoPrimary() (string, error) {
 			SetMaxPoolSize(1)
 		client, err := mongo.Connect(clientOptions)
 		if err != nil {
-			return "", fmt.Errorf("connect to mongo at %q: %w", l.Config.Address, err)
+			return nil, fmt.Errorf("connect to mongo at %q: %w", l.Config.Address, err)
 		}
 		l.mongoClient = client
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), mongoCommandTimeout)
-	defer cancel()
-
 	if err := l.mongoClient.Ping(ctx, nil); err != nil {
-		return "", fmt.Errorf("ping mongo at %q: %w", l.Config.Address, err)
+		return nil, fmt.Errorf("ping mongo at %q: %w", l.Config.Address, err)
 	}
 
 	var hello bson.M
 	if err := l.mongoClient.Database("admin").
 		RunCommand(ctx, bson.D{{Key: "hello", Value: 1}}).
 		Decode(&hello); err != nil {
-		return "", fmt.Errorf("run hello command on mongo at %q: %w", l.Config.Address, err)
+		return nil, fmt.Errorf("run hello command on mongo at %q: %w", l.Config.Address, err)
 	}
-
-	return parsePrimaryPodName(hello)
+	return hello, nil
 }
 
 // closeMongo disconnects the long-lived MongoDB client if one was created. It is
@@ -359,8 +403,8 @@ func parsePrimaryPodName(hello bson.M) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("invalid primary host %q: %w", primaryHost, err)
 	}
-	primaryPodName := strings.Split(host, ".")[0]
-	if len(primaryPodName) != 0 {
+	primaryPodName, _, _ := strings.Cut(host, ".")
+	if primaryPodName != "" {
 		return primaryPodName, nil
 	}
 	return "", fmt.Errorf("unable to derive primary pod name from host %q", host)

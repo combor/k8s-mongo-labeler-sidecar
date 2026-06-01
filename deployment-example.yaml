@@ -154,7 +154,7 @@ spec:
         - name: LABEL_ALL
           value: "true"
         - name: DEBUG
-          value: "true"
+          value: "false"
         # Security context for the sidecar
         securityContext:
           runAsNonRoot: true
@@ -180,7 +180,8 @@ spec:
       - name: mongo-bootstrap
         configMap:
           name: mongo-bootstrap
-          defaultMode: 0755
+          # 0644: the start script is read by bash, not executed directly.
+          defaultMode: 0644
 ---
 # NetworkPolicy restricting ingress to the MongoDB pods to TCP 27017 from pods in
 # the same namespace. NOTE: this is only enforced by a CNI that implements

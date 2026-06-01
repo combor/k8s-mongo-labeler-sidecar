@@ -1,9 +1,11 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -612,5 +614,81 @@ func TestKubeconfigFlag(t *testing.T) {
 
 	os.Args = []string{"sidecar", "--unknown-flag"} // unknown flag
 	_, err = kubeconfigFlag(def)
+	require.Error(t, err)
+}
+
+// withUnsetEnv unsets an environment variable for the duration of the test and
+// restores its previous value afterward.
+func withUnsetEnv(t *testing.T, key string) {
+	t.Helper()
+	orig, had := os.LookupEnv(key)
+	require.NoError(t, os.Unsetenv(key))
+	t.Cleanup(func() {
+		if had {
+			require.NoError(t, os.Setenv(key, orig))
+		} else {
+			require.NoError(t, os.Unsetenv(key))
+		}
+	})
+}
+
+func TestGetMongoPrimary(t *testing.T) {
+	t.Run("parses primary pod from fetched hello response", func(t *testing.T) {
+		l := &Labeler{
+			Config: &Config{Address: "localhost:27017"},
+			helloFetcher: func(context.Context) (bson.M, error) {
+				return bson.M{"primary": "mongo-1.mongo.default.svc.cluster.local:27017"}, nil
+			},
+		}
+		got, err := l.getMongoPrimary()
+		require.NoError(t, err)
+		assert.Equal(t, "mongo-1", got)
+	})
+
+	t.Run("propagates fetch error", func(t *testing.T) {
+		fetchErr := errors.New("mongo unreachable")
+		l := &Labeler{
+			Config: &Config{Address: "localhost:27017"},
+			helloFetcher: func(context.Context) (bson.M, error) {
+				return nil, fetchErr
+			},
+		}
+		_, err := l.getMongoPrimary()
+		require.ErrorIs(t, err, fetchErr)
+	})
+
+	t.Run("surfaces parse error for a non-primary response", func(t *testing.T) {
+		l := &Labeler{
+			Config: &Config{Address: "localhost:27017"},
+			helloFetcher: func(context.Context) (bson.M, error) {
+				return bson.M{"isWritablePrimary": false}, nil
+			},
+		}
+		_, err := l.getMongoPrimary()
+		require.ErrorContains(t, err, "invalid primary host")
+	})
+}
+
+func TestGetKubeClientSet_OutOfClusterError(t *testing.T) {
+	// Force the out-of-cluster path and point --kubeconfig at a missing file so
+	// loading fails deterministically.
+	withUnsetEnv(t, "KUBERNETES_SERVICE_HOST")
+
+	origArgs := os.Args
+	t.Cleanup(func() { os.Args = origArgs })
+	os.Args = []string{"sidecar", "--kubeconfig=" + filepath.Join(t.TempDir(), "missing-kubeconfig")}
+
+	_, err := getKubeClientSet()
+	require.Error(t, err)
+}
+
+func TestNew_KubeClientError(t *testing.T) {
+	withUnsetEnv(t, "KUBERNETES_SERVICE_HOST")
+
+	origArgs := os.Args
+	t.Cleanup(func() { os.Args = origArgs })
+	os.Args = []string{"sidecar", "--kubeconfig=" + filepath.Join(t.TempDir(), "missing-kubeconfig")}
+
+	_, err := New(&Config{LabelSelector: "role=mongo"})
 	require.Error(t, err)
 }
