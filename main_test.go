@@ -215,12 +215,13 @@ func TestSetPrimaryLabel_LabelAllVariants(t *testing.T) {
 			},
 		},
 		{
+			// With LABEL_ALL=false the desired state for non-primaries is "no
+			// primary label". The fixtures start without one, so the no-op
+			// removals are skipped and only the primary is patched.
 			name:     "label all false",
 			labelAll: false,
 			expectedPrimaryByPod: map[string]any{
-				"mongo-0": nil,
 				"mongo-1": "true",
-				"mongo-2": nil,
 			},
 		},
 	}
@@ -442,11 +443,12 @@ func TestSetPrimaryLabel_PrimaryFailover(t *testing.T) {
 	require.NoError(t, labeler.setPrimaryLabel())
 
 	assert.Equal(t, "mongo-2", labeler.lastPrimary, "lastPrimary should track the new primary after failover")
+	// mongo-0 was already primary=false from the initial reconcile, so it is not
+	// re-patched; only the real transitions are written.
 	assert.Equal(t, map[string]any{
-		"mongo-0": "false",
 		"mongo-1": "false",
 		"mongo-2": "true",
-	}, collectPrimaryPatchValues(t, k8sClient), "failover should promote mongo-2 and demote the former primary")
+	}, collectPrimaryPatchValues(t, k8sClient), "failover should promote mongo-2, demote the former primary, and skip the already-correct pod")
 }
 
 func TestHomeDir(t *testing.T) {
@@ -457,4 +459,62 @@ func TestHomeDir(t *testing.T) {
 	// With HOME empty (e.g. Windows), fall back to USERPROFILE.
 	t.Setenv("HOME", "")
 	assert.Equal(t, `C:\Users\tester`, homeDir())
+}
+
+// newClientsetWithPrimary builds a fake clientset whose pods carry the given
+// "primary" label values. An empty value means the pod has no "primary" label.
+func newClientsetWithPrimary(namespace string, primaryByPod map[string]string) *fake.Clientset {
+	objects := make([]runtime.Object, 0, len(primaryByPod))
+	for podName, primary := range primaryByPod {
+		labels := map[string]string{"role": "mongo"}
+		if primary != "" {
+			labels["primary"] = primary
+		}
+		objects = append(objects, &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      podName,
+				Namespace: namespace,
+				Labels:    labels,
+			},
+		})
+	}
+	return fake.NewClientset(objects...)
+}
+
+// TestSetPrimaryLabel_SkipsNoOpPatches verifies that pods whose "primary" label
+// already matches the desired state are not re-patched, while a pod that
+// genuinely needs a change (here, removal of a stale label) still is.
+func TestSetPrimaryLabel_SkipsNoOpPatches(t *testing.T) {
+	tests := []struct {
+		name        string
+		labelAll    bool
+		initial     map[string]string
+		primaryPod  string
+		wantPatches map[string]any
+	}{
+		{
+			name:        "all pods already correct (label all true) -> no patches",
+			labelAll:    true,
+			initial:     map[string]string{"mongo-0": "false", "mongo-1": "true", "mongo-2": "false"},
+			primaryPod:  "mongo-1",
+			wantPatches: map[string]any{},
+		},
+		{
+			name:        "label all false patches only the stale label needing removal",
+			labelAll:    false,
+			initial:     map[string]string{"mongo-0": "true", "mongo-1": "true", "mongo-2": ""},
+			primaryPod:  "mongo-1",
+			wantPatches: map[string]any{"mongo-0": nil},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			k8sClient := newClientsetWithPrimary("default", tt.initial)
+			labeler := newTestLabeler(k8sClient, tt.labelAll, tt.primaryPod)
+
+			require.NoError(t, labeler.setPrimaryLabel())
+			assert.Equal(t, tt.wantPatches, collectPrimaryPatchValues(t, k8sClient))
+		})
+	}
 }

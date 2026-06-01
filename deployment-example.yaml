@@ -111,6 +111,17 @@ spec:
       - name: mongo
         image: mongo:8.0.23
         command: ["/bin/bash", "/scripts/start-mongo.sh"]
+        # Hardening: drop all Linux capabilities and block privilege
+        # escalation. mongod needs no capabilities (it binds 27017, a non-privileged
+        # port). Full non-root + readOnlyRootFilesystem is a follow-up: it requires
+        # an fsGroup for the emptyDir /data/db and a writable /tmp for mongosh.
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+          seccompProfile:
+            type: RuntimeDefault
         ports:
         - containerPort: 27017
         volumeMounts:

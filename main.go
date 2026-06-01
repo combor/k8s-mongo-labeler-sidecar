@@ -7,9 +7,11 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	phuslog "github.com/phuslu/log"
@@ -37,9 +39,13 @@ type Labeler struct {
 	K8sClient       kubernetes.Interface
 	primaryResolver func() (string, error)
 	lastPrimary     string
+	mongoClient     *mongo.Client
 }
 
-const defaultK8sRequestTimeout = 10 * time.Second
+const (
+	defaultK8sRequestTimeout = 10 * time.Second
+	mongoCommandTimeout      = 10 * time.Second
+)
 
 func configureLogger(level phuslog.Level) phuslog.Logger {
 	logger := phuslog.DefaultLogger
@@ -114,6 +120,25 @@ func (l *Labeler) setPrimaryLabel() error {
 			l.lastPrimary = primaryPodName
 		}
 		removePrimaryLabel := !currentPodIsPrimary && !l.Config.LabelAll
+
+		// Skip pods already in the desired state to avoid needless PATCH calls.
+		// The lastPrimary/transition bookkeeping above still runs.
+		currentValue, hasLabel := pod.Labels["primary"]
+		switch {
+		case currentPodIsPrimary:
+			if currentValue == "true" {
+				continue
+			}
+		case removePrimaryLabel:
+			if !hasLabel {
+				continue
+			}
+		default: // non-primary with LABEL_ALL: desired value is "false"
+			if currentValue == "false" {
+				continue
+			}
+		}
+
 		patchBytes, err := json.Marshal(primaryLabelPatch(currentPodIsPrimary, removePrimaryLabel))
 		if err != nil {
 			return fmt.Errorf("marshal primary label patch for pod %q: %w", currentPodName, err)
@@ -230,36 +255,51 @@ func homeDir() string {
 	return os.Getenv("USERPROFILE") // windows
 }
 
+// getMongoPrimary resolves the primary pod name from MongoDB. It lazily connects
+// a single long-lived client on first use and reuses it on every subsequent tick.
+// The mongo-driver Client is concurrency-safe and maintains its own connection
+// pool, so connecting/disconnecting on every tick is wasteful.
 func (l *Labeler) getMongoPrimary() (string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	if l.mongoClient == nil {
+		clientOptions := options.Client().
+			ApplyURI("mongodb://" + l.Config.Address).
+			SetDirect(true).
+			SetMinPoolSize(1).
+			SetMaxPoolSize(1)
+		client, err := mongo.Connect(clientOptions)
+		if err != nil {
+			return "", fmt.Errorf("connect to mongo at %q: %w", l.Config.Address, err)
+		}
+		l.mongoClient = client
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), mongoCommandTimeout)
 	defer cancel()
 
-	clientOptions := options.Client().
-		ApplyURI(fmt.Sprintf("mongodb://%s", l.Config.Address)).
-		SetDirect(true)
-	client, err := mongo.Connect(clientOptions)
-	if err != nil {
-		return "", fmt.Errorf("connect to mongo at %q: %w", l.Config.Address, err)
-	}
-	defer func() {
-		err := client.Disconnect(ctx)
-		if err != nil {
-			phuslog.Debug().Msgf("unable to close mongo connection: %v", err)
-		}
-	}()
-	if err = client.Ping(ctx, nil); err != nil {
+	if err := l.mongoClient.Ping(ctx, nil); err != nil {
 		return "", fmt.Errorf("ping mongo at %q: %w", l.Config.Address, err)
 	}
 
 	var hello bson.M
-	err = client.Database("admin").
+	if err := l.mongoClient.Database("admin").
 		RunCommand(ctx, bson.D{{Key: "hello", Value: 1}}).
-		Decode(&hello)
-	if err != nil {
+		Decode(&hello); err != nil {
 		return "", fmt.Errorf("run hello command on mongo at %q: %w", l.Config.Address, err)
 	}
 
 	return parsePrimaryPodName(hello)
+}
+
+// closeMongo disconnects the long-lived MongoDB client if one was created. It is
+// safe to call when no client exists and is intended for graceful shutdown.
+func (l *Labeler) closeMongo(ctx context.Context) {
+	if l.mongoClient == nil {
+		return
+	}
+	if err := l.mongoClient.Disconnect(ctx); err != nil {
+		phuslog.Debug().Msgf("unable to close mongo connection: %v", err)
+	}
+	l.mongoClient = nil
 }
 
 // parsePrimaryPodName extracts the primary pod name from a MongoDB "hello"
@@ -310,11 +350,31 @@ func main() {
 		phuslog.Fatal().Err(err).Msg("failed to initialize labeler")
 	}
 
-	ticker := time.NewTicker(5 * time.Second)
-	defer ticker.Stop()
-	for range ticker.C {
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	reconcile := func() {
 		if err := labeler.setPrimaryLabel(); err != nil {
 			phuslog.Error().Err(err).Msg("failed to set primary label")
+		}
+	}
+
+	// Reconcile once immediately so pod labels converge at startup instead of
+	// only after the first tick fires.
+	reconcile()
+
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			phuslog.Info().Msg("shutdown signal received, stopping")
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			labeler.closeMongo(shutdownCtx)
+			cancel()
+			return
+		case <-ticker.C:
+			reconcile()
 		}
 	}
 }
