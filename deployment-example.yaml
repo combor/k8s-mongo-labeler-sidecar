@@ -109,7 +109,7 @@ spec:
           type: RuntimeDefault
       containers:
       - name: mongo
-        image: mongo:8.0.19
+        image: mongo:8.0.23
         command: ["/bin/bash", "/scripts/start-mongo.sh"]
         ports:
         - containerPort: 27017
