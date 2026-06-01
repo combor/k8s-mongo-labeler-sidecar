@@ -69,6 +69,8 @@ docker pull ghcr.io/combor/k8s-mongo-labeler-sidecar:0.6.2
 
 `deployment-example.yaml` can be used as an example deployment manifest.
 
+> **Note:** the example runs MongoDB **without authentication or TLS** and is intended for demonstration only. The bundled `NetworkPolicy` limits access to port 27017 to pods in the same namespace, but it is only enforced by CNIs that implement NetworkPolicy. Before production use, enable MongoDB authentication (keyFile/SCRAM) and TLS, and review the resource limits and security contexts.
+
 ## Integration test (kind)
 
 The repository includes an end-to-end test environment in `test/integration`.

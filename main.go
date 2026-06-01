@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"os/signal"
@@ -84,10 +85,11 @@ func (l *Labeler) setPrimaryLabel() error {
 	if err != nil {
 		return fmt.Errorf("resolve primary pod name: %w", err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), l.Config.K8sRequestTimeout)
+
+	listCtx, cancel := context.WithTimeout(context.Background(), l.Config.K8sRequestTimeout)
 	defer cancel()
 	podsClient := l.K8sClient.CoreV1().Pods(l.Config.Namespace)
-	pods, err := podsClient.List(ctx, metav1.ListOptions{LabelSelector: l.Config.LabelSelector})
+	pods, err := podsClient.List(listCtx, metav1.ListOptions{LabelSelector: l.Config.LabelSelector})
 	if err != nil {
 		return fmt.Errorf(
 			"list pods in namespace %q with selector %q: %w",
@@ -97,64 +99,84 @@ func (l *Labeler) setPrimaryLabel() error {
 		)
 	}
 	phuslog.Debug().Msgf("Found %d pods", len(pods.Items))
-	foundPrimary := false
+
+	primaryFound := false
+	primaryAlreadyTrue := false
 	for _, pod := range pods.Items {
 		if pod.GetName() == primaryPodName {
-			foundPrimary = true
+			primaryFound = true
+			primaryAlreadyTrue = pod.Labels["primary"] == "true"
 			break
 		}
 	}
-	if !foundPrimary {
+	if !primaryFound {
 		return fmt.Errorf("primary not found")
 	}
 
+	// Demote (or unlabel) every non-primary pod before promoting the primary, so
+	// that during a failover the old primary loses primary=true before the new one
+	// gains it. This favors a brief window with no primary over one with two.
 	for _, pod := range pods.Items {
-		currentPodName := pod.GetName()
-		currentPodIsPrimary := currentPodName == primaryPodName
-		if currentPodIsPrimary && pod.Labels["primary"] != "true" {
-			if l.lastPrimary == "" {
-				phuslog.Info().Str("pod", primaryPodName).Msg("primary detected")
-			} else {
-				phuslog.Info().Str("from", l.lastPrimary).Str("to", primaryPodName).Msg("primary changed")
-			}
-			l.lastPrimary = primaryPodName
+		podName := pod.GetName()
+		if podName == primaryPodName {
+			continue
 		}
-		removePrimaryLabel := !currentPodIsPrimary && !l.Config.LabelAll
+		removePrimaryLabel := !l.Config.LabelAll
+		currentValue, hasLabel := pod.Labels["primary"]
 
 		// Skip pods already in the desired state to avoid needless PATCH calls.
-		// The lastPrimary/transition bookkeeping above still runs.
-		currentValue, hasLabel := pod.Labels["primary"]
-		switch {
-		case currentPodIsPrimary:
-			if currentValue == "true" {
-				continue
-			}
-		case removePrimaryLabel:
-			if !hasLabel {
-				continue
-			}
-		default: // non-primary with LABEL_ALL: desired value is "false"
-			if currentValue == "false" {
-				continue
-			}
+		alreadyDesired := (removePrimaryLabel && !hasLabel) || (!removePrimaryLabel && currentValue == "false")
+		if alreadyDesired {
+			continue
 		}
+		if err := l.patchPrimaryLabel(podName, false, removePrimaryLabel); err != nil {
+			return err
+		}
+	}
 
-		patchBytes, err := json.Marshal(primaryLabelPatch(currentPodIsPrimary, removePrimaryLabel))
-		if err != nil {
-			return fmt.Errorf("marshal primary label patch for pod %q: %w", currentPodName, err)
+	// Promote the primary last, and only if it is not already labelled.
+	if !primaryAlreadyTrue {
+		if err := l.patchPrimaryLabel(primaryPodName, true, false); err != nil {
+			return err
 		}
+	}
 
-		phuslog.Debug().Msgf("Patching pod %s with: %s", currentPodName, string(patchBytes))
-		_, err = podsClient.Patch(
-			ctx,
-			currentPodName,
-			types.StrategicMergePatchType,
-			patchBytes,
-			metav1.PatchOptions{},
-		)
-		if err != nil {
-			return fmt.Errorf("patch pod %q primary label: %w", currentPodName, err)
+	// Record the transition only after the primary's label is confirmed (it was
+	// already true, or the promotion patch above succeeded), so a failed promotion
+	// is retried and logged on a later tick rather than being silently recorded.
+	if primaryPodName != l.lastPrimary {
+		if l.lastPrimary == "" {
+			phuslog.Info().Str("pod", primaryPodName).Msg("primary detected")
+		} else {
+			phuslog.Info().Str("from", l.lastPrimary).Str("to", primaryPodName).Msg("primary changed")
 		}
+		l.lastPrimary = primaryPodName
+	}
+	return nil
+}
+
+// patchPrimaryLabel applies a strategic-merge patch to a single pod's "primary"
+// label using a fresh per-call timeout, so each request has an independent
+// deadline rather than sharing one budget across the whole reconcile.
+func (l *Labeler) patchPrimaryLabel(podName string, isPrimary, remove bool) error {
+	patchBytes, err := json.Marshal(primaryLabelPatch(isPrimary, remove))
+	if err != nil {
+		return fmt.Errorf("marshal primary label patch for pod %q: %w", podName, err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), l.Config.K8sRequestTimeout)
+	defer cancel()
+
+	phuslog.Debug().Msgf("Patching pod %s with: %s", podName, string(patchBytes))
+	_, err = l.K8sClient.CoreV1().Pods(l.Config.Namespace).Patch(
+		ctx,
+		podName,
+		types.StrategicMergePatchType,
+		patchBytes,
+		metav1.PatchOptions{},
+	)
+	if err != nil {
+		return fmt.Errorf("patch pod %q primary label: %w", podName, err)
 	}
 	return nil
 }
@@ -223,7 +245,6 @@ func getConfigFromEnvironment() (*Config, error) {
 }
 
 func getKubeClientSet() (*kubernetes.Clientset, error) {
-
 	if _, ok := os.LookupEnv("KUBERNETES_SERVICE_HOST"); ok {
 		config, err := rest.InClusterConfig()
 		if err != nil {
@@ -232,20 +253,37 @@ func getKubeClientSet() (*kubernetes.Clientset, error) {
 		return kubernetes.NewForConfig(config)
 	}
 
-	var kubeconfig *string
+	// Outside a cluster, default to ~/.kube/config, overridable with the
+	// --kubeconfig flag (see README).
+	defaultKubeconfig := ""
 	if home := homeDir(); home != "" {
-		kubeconfig = flag.String("kubeconfig", filepath.Join(home, ".kube", "config"), "(optional) absolute path to the kubeconfig file")
-	} else {
-		kubeconfig = flag.String("kubeconfig", "", "absolute path to the kubeconfig file")
+		defaultKubeconfig = filepath.Join(home, ".kube", "config")
 	}
-	flag.Parse()
 
-	// use the current context in kubeconfig
-	config, err := clientcmd.BuildConfigFromFlags("", *kubeconfig)
+	kubeconfig, err := kubeconfigFlag(defaultKubeconfig)
+	if err != nil {
+		return nil, err
+	}
+	config, err := clientcmd.BuildConfigFromFlags("", kubeconfig)
 	if err != nil {
 		return nil, err
 	}
 	return kubernetes.NewForConfig(config)
+}
+
+// kubeconfigFlag parses the optional --kubeconfig flag from the process
+// arguments using a local flag set, so it does not mutate the global
+// flag.CommandLine and is safe to call more than once. A malformed invocation
+// (an unknown flag, or --kubeconfig without a value) returns an error so the
+// sidecar fails fast rather than silently falling back to the default kubeconfig.
+func kubeconfigFlag(defaultPath string) (string, error) {
+	fs := flag.NewFlagSet(os.Args[0], flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	kubeconfig := fs.String("kubeconfig", defaultPath, "(optional) absolute path to the kubeconfig file")
+	if err := fs.Parse(os.Args[1:]); err != nil {
+		return "", fmt.Errorf("parse command-line flags: %w", err)
+	}
+	return *kubeconfig, nil
 }
 
 func homeDir() string {

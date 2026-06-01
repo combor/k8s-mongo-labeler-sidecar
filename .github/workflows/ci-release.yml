@@ -126,7 +126,6 @@ jobs:
       matrix:
         arch: [amd64, arm64]
     permissions:
-      actions: write
       contents: read
       packages: write
     outputs:

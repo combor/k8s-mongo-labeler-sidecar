@@ -29,16 +29,16 @@ Values for the `Status` column: `todo` · `wip` (in progress) · `done` · `wont
 | R3 | Pin all GitHub Actions to commit SHAs | security | medium | S | done | 27 uses: pinned (2 workflows) |
 | R4 | Harden the `mongo` container in the example manifest | security | medium | S | done | drop-ALL+noPrivEsc; non-root is follow-up; integration test passed |
 | R5 | Reconcile once before the ticker (+ optional SIGTERM) | correctness | low* | XS | done | unit+lint green |
-| R6 | Demote-before-promote patch ordering | correctness | low | S | todo | |
-| R7 | Advance `lastPrimary` only after the promotion patch succeeds | correctness | low | S | todo | |
-| R8 | Remove unused `actions: write` from build-and-push job | security | low | XS | todo | |
-| R9 | Add resource requests/limits to example containers | security | low | S | todo | |
-| R10 | Add NetworkPolicy + README note (example Mongo is unauth/demo) | security | low | S | todo | |
-| R11 | Per-call timeout contexts for List vs Patch | perf | low | S | todo | |
-| R12 | Replace `flag.String`/`flag.Parse` side effect in `getKubeClientSet` | simplify | low | S | todo | |
-| R13 | Add `-trimpath -ldflags="-s -w"` to Dockerfile build | perf | low | XS | todo | |
-| R14 | Add `toolchain` directive to `go.mod` | security | low | XS | todo | |
-| R15 | Deduplicate patch-collection block in tests | simplify | low | XS | todo | |
+| R6 | Demote-before-promote patch ordering | correctness | low | S | done | reviewed; ordering test added; run.sh pending |
+| R7 | Advance `lastPrimary` only after the promotion patch succeeds | correctness | low | S | done | reviewed; promotion-failure test added |
+| R8 | Remove unused `actions: write` from build-and-push job | security | low | XS | done | reviewed safe (no Actions-API step) |
+| R9 | Add resource requests/limits to example containers | security | low | S | done | review ok; run.sh pending |
+| R10 | Add NetworkPolicy + README note (example Mongo is unauth/demo) | security | low | S | done | review ok (allows replica+loopback); run.sh pending |
+| R11 | Per-call timeout contexts for List vs Patch | perf | low | S | done | reviewed; patchPrimaryLabel helper |
+| R12 | Replace `flag.String`/`flag.Parse` side effect in `getKubeClientSet` | simplify | low | S | done | local FlagSet (no global flag.Parse/re-entrancy); --kubeconfig preserved + test |
+| R13 | Add `-trimpath -ldflags="-s -w"` to Dockerfile build | perf | low | XS | done | Dockerfile + goreleaser; goreleaser check ok |
+| R14 | Add `toolchain` directive to `go.mod` | security | low | XS | wontfix | n/a: `go 1.26.3` already pins the patch; explicit toolchain line is redundant and Go rejects it |
+| R15 | Deduplicate patch-collection block in tests | simplify | low | XS | done | uses collectPrimaryPatchValues |
 | R16 | Image provenance / SBOM / signing (cosign) | security | low | M | todo | |
 | R17 | Prometheus metrics + `/healthz` surface | observability | info | M | todo | |
 | R18 | Test error paths of `getMongoPrimary`, `New`, `getKubeClientSet` | correctness | low | M | todo | |

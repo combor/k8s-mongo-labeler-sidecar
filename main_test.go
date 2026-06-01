@@ -234,26 +234,7 @@ func TestSetPrimaryLabel_LabelAllVariants(t *testing.T) {
 			err := labeler.setPrimaryLabel()
 			require.NoError(t, err)
 
-			primaryValuesByPod := map[string]any{}
-			for _, action := range k8sClient.Actions() {
-				if action.GetVerb() != "patch" || action.GetResource().Resource != "pods" {
-					continue
-				}
-				patchAction, ok := action.(k8stesting.PatchAction)
-				require.True(t, ok)
-
-				var patch map[string]any
-				require.NoError(t, json.Unmarshal(patchAction.GetPatch(), &patch))
-
-				metadata, ok := patch["metadata"].(map[string]any)
-				require.True(t, ok)
-				labels, ok := metadata["labels"].(map[string]any)
-				require.True(t, ok)
-
-				primaryValuesByPod[patchAction.GetName()] = labels["primary"]
-			}
-
-			assert.Equal(t, tt.expectedPrimaryByPod, primaryValuesByPod)
+			assert.Equal(t, tt.expectedPrimaryByPod, collectPrimaryPatchValues(t, k8sClient))
 		})
 	}
 }
@@ -305,24 +286,27 @@ func TestSetPrimaryLabel_ListPodsError(t *testing.T) {
 
 func TestSetPrimaryLabel_StopsAfterPatchError(t *testing.T) {
 	k8sClient := newMongoClientset("default", "mongo-0", "mongo-1", "mongo-2")
-	patchErr := errors.New("patch failed for mongo-1")
+	patchErr := errors.New("patch failed for mongo-0")
 	k8sClient.PrependReactor("patch", "pods", func(action k8stesting.Action) (bool, runtime.Object, error) {
 		patchAction, ok := action.(k8stesting.PatchAction)
 		if !ok {
 			return false, nil, nil
 		}
-		if patchAction.GetName() == "mongo-1" {
+		if patchAction.GetName() == "mongo-0" {
 			return true, nil, patchErr
 		}
 		return false, nil, nil
 	})
 
+	// mongo-1 is the primary, so the non-primary mongo-0 is demoted first. Failing
+	// that patch must abort the reconcile before promoting the primary or touching
+	// any remaining pod.
 	labeler := newTestLabeler(k8sClient, true, "mongo-1")
 
 	err := labeler.setPrimaryLabel()
 	require.Error(t, err)
 	require.ErrorIs(t, err, patchErr)
-	require.ErrorContains(t, err, "patch pod \"mongo-1\" primary label")
+	require.ErrorContains(t, err, "patch pod \"mongo-0\" primary label")
 
 	patchedPods := []string{}
 	for _, action := range k8sClient.Actions() {
@@ -334,7 +318,8 @@ func TestSetPrimaryLabel_StopsAfterPatchError(t *testing.T) {
 		patchedPods = append(patchedPods, patchAction.GetName())
 	}
 
-	assert.Equal(t, []string{"mongo-0", "mongo-1"}, patchedPods)
+	assert.Equal(t, []string{"mongo-0"}, patchedPods)
+	assert.NotContains(t, patchedPods, "mongo-1")
 	assert.NotContains(t, patchedPods, "mongo-2")
 }
 
@@ -486,25 +471,28 @@ func newClientsetWithPrimary(namespace string, primaryByPod map[string]string) *
 // genuinely needs a change (here, removal of a stale label) still is.
 func TestSetPrimaryLabel_SkipsNoOpPatches(t *testing.T) {
 	tests := []struct {
-		name        string
-		labelAll    bool
-		initial     map[string]string
-		primaryPod  string
-		wantPatches map[string]any
+		name            string
+		labelAll        bool
+		initial         map[string]string
+		primaryPod      string
+		wantPatches     map[string]any
+		wantLastPrimary string
 	}{
 		{
-			name:        "all pods already correct (label all true) -> no patches",
-			labelAll:    true,
-			initial:     map[string]string{"mongo-0": "false", "mongo-1": "true", "mongo-2": "false"},
-			primaryPod:  "mongo-1",
-			wantPatches: map[string]any{},
+			name:            "all pods already correct (label all true) -> no patches",
+			labelAll:        true,
+			initial:         map[string]string{"mongo-0": "false", "mongo-1": "true", "mongo-2": "false"},
+			primaryPod:      "mongo-1",
+			wantPatches:     map[string]any{},
+			wantLastPrimary: "mongo-1",
 		},
 		{
-			name:        "label all false patches only the stale label needing removal",
-			labelAll:    false,
-			initial:     map[string]string{"mongo-0": "true", "mongo-1": "true", "mongo-2": ""},
-			primaryPod:  "mongo-1",
-			wantPatches: map[string]any{"mongo-0": nil},
+			name:            "label all false patches only the stale label needing removal",
+			labelAll:        false,
+			initial:         map[string]string{"mongo-0": "true", "mongo-1": "true", "mongo-2": ""},
+			primaryPod:      "mongo-1",
+			wantPatches:     map[string]any{"mongo-0": nil},
+			wantLastPrimary: "mongo-1",
 		},
 	}
 
@@ -515,6 +503,114 @@ func TestSetPrimaryLabel_SkipsNoOpPatches(t *testing.T) {
 
 			require.NoError(t, labeler.setPrimaryLabel())
 			assert.Equal(t, tt.wantPatches, collectPrimaryPatchValues(t, k8sClient))
+			// Even when the primary is already labelled (no patch issued), the
+			// transition is still recorded so later failovers log correctly.
+			assert.Equal(t, tt.wantLastPrimary, labeler.lastPrimary)
 		})
 	}
+}
+
+// TestSetPrimaryLabel_DemotesBeforePromotes verifies that on a failover the old
+// primary is demoted before the new primary is promoted, with the promotion
+// issued as the final patch, so the cluster never briefly advertises two
+// primaries.
+func TestSetPrimaryLabel_DemotesBeforePromotes(t *testing.T) {
+	// mongo-0 is the stale primary (still primary=true); mongo-2 is the new one.
+	k8sClient := newClientsetWithPrimary("default", map[string]string{
+		"mongo-0": "true",
+		"mongo-1": "false",
+		"mongo-2": "false",
+	})
+	labeler := newTestLabeler(k8sClient, true, "mongo-2")
+
+	require.NoError(t, labeler.setPrimaryLabel())
+
+	patchedPods := []string{}
+	for _, action := range k8sClient.Actions() {
+		if action.GetVerb() != "patch" || action.GetResource().Resource != "pods" {
+			continue
+		}
+		patchAction, ok := action.(k8stesting.PatchAction)
+		require.True(t, ok)
+		patchedPods = append(patchedPods, patchAction.GetName())
+	}
+
+	// Only mongo-0 needs demotion (mongo-1 is already false), and the new primary
+	// mongo-2 is promoted last.
+	assert.Equal(t, []string{"mongo-0", "mongo-2"}, patchedPods)
+}
+
+// TestSetPrimaryLabel_StopsAfterPromotionError verifies that when the final
+// promotion patch fails, the error is returned, the preceding non-primary
+// demotions were still issued, and lastPrimary is NOT advanced (so the
+// transition is retried and logged correctly on a later tick).
+func TestSetPrimaryLabel_StopsAfterPromotionError(t *testing.T) {
+	k8sClient := newMongoClientset("default", "mongo-0", "mongo-1", "mongo-2")
+	patchErr := errors.New("patch failed for mongo-1")
+	k8sClient.PrependReactor("patch", "pods", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		patchAction, ok := action.(k8stesting.PatchAction)
+		if !ok {
+			return false, nil, nil
+		}
+		if patchAction.GetName() == "mongo-1" {
+			return true, nil, patchErr
+		}
+		return false, nil, nil
+	})
+
+	// mongo-1 is the primary and is promoted last; failing only its patch must
+	// leave lastPrimary unset while the non-primary demotions still went out.
+	labeler := newTestLabeler(k8sClient, true, "mongo-1")
+
+	err := labeler.setPrimaryLabel()
+	require.ErrorIs(t, err, patchErr)
+	require.ErrorContains(t, err, "patch pod \"mongo-1\" primary label")
+
+	patchedPods := []string{}
+	for _, action := range k8sClient.Actions() {
+		if action.GetVerb() != "patch" || action.GetResource().Resource != "pods" {
+			continue
+		}
+		patchAction, ok := action.(k8stesting.PatchAction)
+		require.True(t, ok)
+		patchedPods = append(patchedPods, patchAction.GetName())
+	}
+
+	// Both non-primary demotions were issued before the promotion attempt failed.
+	assert.Equal(t, []string{"mongo-0", "mongo-2", "mongo-1"}, patchedPods)
+	assert.Empty(t, labeler.lastPrimary, "a failed promotion must not advance lastPrimary")
+}
+
+func TestKubeconfigFlag(t *testing.T) {
+	origArgs := os.Args
+	t.Cleanup(func() { os.Args = origArgs })
+
+	const def = "/home/tester/.kube/config"
+
+	// No flag: the default path is returned unchanged.
+	os.Args = []string{"sidecar"}
+	got, err := kubeconfigFlag(def)
+	require.NoError(t, err)
+	assert.Equal(t, def, got)
+
+	// --kubeconfig=VALUE overrides the default (README-documented behavior).
+	os.Args = []string{"sidecar", "--kubeconfig=/tmp/dev"}
+	got, err = kubeconfigFlag(def)
+	require.NoError(t, err)
+	assert.Equal(t, "/tmp/dev", got)
+
+	// The single-dash -kubeconfig VALUE form is also honored.
+	os.Args = []string{"sidecar", "-kubeconfig", "/tmp/dev2"}
+	got, err = kubeconfigFlag(def)
+	require.NoError(t, err)
+	assert.Equal(t, "/tmp/dev2", got)
+
+	// Malformed invocations must fail fast, not silently use the default.
+	os.Args = []string{"sidecar", "--kubeconfig"} // missing value
+	_, err = kubeconfigFlag(def)
+	require.Error(t, err)
+
+	os.Args = []string{"sidecar", "--unknown-flag"} // unknown flag
+	_, err = kubeconfigFlag(def)
+	require.Error(t, err)
 }
