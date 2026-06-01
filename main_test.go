@@ -398,3 +398,63 @@ func TestParsePrimaryPodName(t *testing.T) {
 		})
 	}
 }
+
+// collectPrimaryPatchValues returns the "primary" label value sent in each pod
+// patch action recorded by the fake client, keyed by pod name.
+func collectPrimaryPatchValues(t *testing.T, k8sClient *fake.Clientset) map[string]any {
+	t.Helper()
+
+	values := map[string]any{}
+	for _, action := range k8sClient.Actions() {
+		if action.GetVerb() != "patch" || action.GetResource().Resource != "pods" {
+			continue
+		}
+		patchAction, ok := action.(k8stesting.PatchAction)
+		require.True(t, ok)
+
+		var patch map[string]any
+		require.NoError(t, json.Unmarshal(patchAction.GetPatch(), &patch))
+		metadata, ok := patch["metadata"].(map[string]any)
+		require.True(t, ok)
+		labels, ok := metadata["labels"].(map[string]any)
+		require.True(t, ok)
+
+		values[patchAction.GetName()] = labels["primary"]
+	}
+	return values
+}
+
+func TestSetPrimaryLabel_PrimaryFailover(t *testing.T) {
+	k8sClient := newMongoClientset("default", "mongo-0", "mongo-1", "mongo-2")
+	labeler := newTestLabeler(k8sClient, true, "mongo-1")
+
+	// Initial detection: mongo-1 is primary and lastPrimary was unset, so this
+	// exercises the "primary detected" branch.
+	require.NoError(t, labeler.setPrimaryLabel())
+	require.Equal(t, "mongo-1", labeler.lastPrimary)
+
+	// Failover: mongo-2 is promoted. lastPrimary is now non-empty, so this drives
+	// the "primary changed" transition branch.
+	k8sClient.ClearActions()
+	labeler.primaryResolver = func() (string, error) {
+		return "mongo-2", nil
+	}
+	require.NoError(t, labeler.setPrimaryLabel())
+
+	assert.Equal(t, "mongo-2", labeler.lastPrimary, "lastPrimary should track the new primary after failover")
+	assert.Equal(t, map[string]any{
+		"mongo-0": "false",
+		"mongo-1": "false",
+		"mongo-2": "true",
+	}, collectPrimaryPatchValues(t, k8sClient), "failover should promote mongo-2 and demote the former primary")
+}
+
+func TestHomeDir(t *testing.T) {
+	t.Setenv("HOME", "/home/tester")
+	t.Setenv("USERPROFILE", `C:\Users\tester`)
+	assert.Equal(t, "/home/tester", homeDir())
+
+	// With HOME empty (e.g. Windows), fall back to USERPROFILE.
+	t.Setenv("HOME", "")
+	assert.Equal(t, `C:\Users\tester`, homeDir())
+}
