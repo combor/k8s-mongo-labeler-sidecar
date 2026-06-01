@@ -111,6 +111,24 @@ spec:
       - name: mongo
         image: mongo:8.0.23
         command: ["/bin/bash", "/scripts/start-mongo.sh"]
+        # Hardening: drop all Linux capabilities and block privilege
+        # escalation. mongod needs no capabilities (it binds 27017, a non-privileged
+        # port). Full non-root + readOnlyRootFilesystem is a follow-up: it requires
+        # an fsGroup for the emptyDir /data/db and a writable /tmp for mongosh.
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+          seccompProfile:
+            type: RuntimeDefault
+        resources:
+          requests:
+            cpu: 250m
+            memory: 256Mi
+          limits:
+            # No CPU limit so the database is not throttled under load.
+            memory: 1Gi
         ports:
         - containerPort: 27017
         volumeMounts:
@@ -136,7 +154,7 @@ spec:
         - name: LABEL_ALL
           value: "true"
         - name: DEBUG
-          value: "true"
+          value: "false"
         # Security context for the sidecar
         securityContext:
           runAsNonRoot: true
@@ -149,10 +167,40 @@ spec:
             - ALL
           seccompProfile:
             type: RuntimeDefault
+        resources:
+          requests:
+            cpu: 10m
+            memory: 32Mi
+          limits:
+            cpu: 100m
+            memory: 64Mi
       volumes:
       - name: mongo-persistent-storage
         emptyDir: {}
       - name: mongo-bootstrap
         configMap:
           name: mongo-bootstrap
-          defaultMode: 0755
+          # 0644: the start script is read by bash, not executed directly.
+          defaultMode: 0644
+---
+# NetworkPolicy restricting ingress to the MongoDB pods to TCP 27017 from pods in
+# the same namespace. NOTE: this is only enforced by a CNI that implements
+# NetworkPolicy (kind's default kindnet does not). The example mongod also runs
+# WITHOUT authentication or TLS and is for demonstration only; enable Mongo
+# auth/keyFile and TLS before exposing it in production.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: mongo
+spec:
+  podSelector:
+    matchLabels:
+      role: mongo
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - podSelector: {}
+    ports:
+    - port: 27017
+      protocol: TCP

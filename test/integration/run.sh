@@ -17,6 +17,18 @@ cleanup() {
 }
 trap cleanup EXIT
 
+dump_diagnostics() {
+  echo "=== Diagnostics: cluster state ==="
+  kubectl get pods -o wide || true
+  kubectl describe statefulset/mongo || true
+  for pod in mongo-0 mongo-1 mongo-2; do
+    echo "--- ${pod} mongo logs (tail) ---"
+    kubectl logs "${pod}" -c mongo --tail=50 || true
+    echo "--- ${pod} labeler logs (tail) ---"
+    kubectl logs "${pod}" -c labeler --tail=50 || true
+  done
+}
+
 export DOCKER_BUILDKIT=1
 
 ensure_docker_available() {
@@ -69,7 +81,11 @@ kind load docker-image --name "${CLUSTER_NAME}" "${LABELER_IMAGE}"
 echo "Deploying integration stack into default namespace..."
 kubectl apply -f "${ROOT_DIR}/deployment-example.yaml"
 kubectl set image statefulset/mongo labeler="${LABELER_IMAGE}"
-kubectl rollout status statefulset/mongo --timeout="${TIMEOUT}"
+if ! kubectl rollout status statefulset/mongo --timeout="${TIMEOUT}"; then
+  echo "FAIL: statefulset/mongo did not become ready within ${TIMEOUT}"
+  dump_diagnostics
+  exit 1
+fi
 
 pods=(mongo-0 mongo-1 mongo-2)
 expected_false_count=$(( ${#pods[@]} - 1 ))

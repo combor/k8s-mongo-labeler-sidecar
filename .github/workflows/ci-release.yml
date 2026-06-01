@@ -26,15 +26,15 @@ jobs:
 
     steps:
     - name: Checkout repository
-      uses: actions/checkout@v6.0.2
+      uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
     - name: Set up Go
-      uses: actions/setup-go@v6.4.0
+      uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
       with:
         go-version-file: go.mod
 
     - name: Run golangci-lint
-      uses: golangci/golangci-lint-action@v9.2.1
+      uses: golangci/golangci-lint-action@82606bf257cbaff209d206a39f5134f0cfbfd2ee # v9.2.1
       with:
         version: v2.12.2
         args: --timeout=10m
@@ -48,10 +48,10 @@ jobs:
 
     steps:
     - name: Checkout repository
-      uses: actions/checkout@v6.0.2
+      uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
     - name: Set up Go
-      uses: actions/setup-go@v6.4.0
+      uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
       with:
         go-version-file: go.mod
 
@@ -59,7 +59,7 @@ jobs:
       run: go test -coverprofile=coverage.out -covermode=atomic ./...
 
     - name: Upload to Codecov
-      uses: codecov/codecov-action@v6.0.1
+      uses: codecov/codecov-action@e79a6962e0d4c0c17b229090214935d2e33f8354 # v6.0.1
       with:
         files: coverage.out
         token: ${{ secrets.CODECOV_TOKEN }}
@@ -73,15 +73,15 @@ jobs:
 
     steps:
     - name: Checkout repository
-      uses: actions/checkout@v6.0.2
+      uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
     - name: Set up Go
-      uses: actions/setup-go@v6.4.0
+      uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
       with:
         go-version-file: go.mod
 
     - name: Run govulncheck
-      uses: golang/govulncheck-action@v1.0.4
+      uses: golang/govulncheck-action@b625fbe08f3bccbe446d94fbf87fcc875a4f50ee # v1.0.4
       with:
         go-package: ./...
         repo-checkout: false
@@ -97,18 +97,18 @@ jobs:
 
     steps:
     - name: Checkout repository
-      uses: actions/checkout@v6.0.2
+      uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       with:
         fetch-depth: 0
 
     - name: Set up Go
-      uses: actions/setup-go@v6.4.0
+      uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
       with:
         go-version-file: go.mod
 
     - name: Release binaries
       if: github.actor != 'nektos/act'
-      uses: goreleaser/goreleaser-action@v7.2.2
+      uses: goreleaser/goreleaser-action@5daf1e915a5f0af01ddbcd89a43b8061ff4f1a89 # v7.2.2
       with:
         distribution: goreleaser
         version: "~> v2"
@@ -126,7 +126,6 @@ jobs:
       matrix:
         arch: [amd64, arm64]
     permissions:
-      actions: write
       contents: read
       packages: write
     outputs:
@@ -134,40 +133,33 @@ jobs:
 
     steps:
     - name: Checkout repository
-      uses: actions/checkout@v6.0.2
+      uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
     - name: Set up Go
-      if: github.actor == 'nektos/act'
-      uses: actions/setup-go@v6.4.0
+      uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
       with:
         go-version-file: go.mod
 
-    - name: Build release binary (local)
-      if: github.actor == 'nektos/act'
+    # Build the image binary from the checked-out source so the published image
+    # always matches this commit, instead of re-downloading a release asset that
+    # could drift from the tagged SHA.
+    - name: Build release binary from source
       run: |
         mkdir -p dist
-        CGO_ENABLED=0 GOOS=linux GOARCH=${{ matrix.arch }} go build -o "dist/k8s-mongo-labeler-sidecar-linux-${{ matrix.arch }}" ./
-
-    - name: Download release binary
-      if: github.actor != 'nektos/act'
-      run: |
-        mkdir -p dist
-        TAG="${GITHUB_REF#refs/tags/}"
-        gh release download "${TAG}" --pattern "k8s-mongo-labeler-sidecar_*_linux_${{ matrix.arch }}.tar.gz" --dir /tmp
-        tar -xzf /tmp/k8s-mongo-labeler-sidecar_*_linux_${{ matrix.arch }}.tar.gz -C dist/
-      env:
-        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        CGO_ENABLED=0 GOOS=linux GOARCH=${{ matrix.arch }} \
+          go build -trimpath -ldflags="-s -w" \
+          -o "dist/k8s-mongo-labeler-sidecar-linux-${{ matrix.arch }}" ./
 
     - name: Set up QEMU
       if: matrix.arch != 'amd64'
-      uses: docker/setup-qemu-action@v4.1.0
+      uses: docker/setup-qemu-action@06116385d9baf250c9f4dcb4858b16962ea869c3 # v4.1.0
 
     - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v4.1.0
+      uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
 
     - name: Log in to GitHub Container Registry
       if: github.actor != 'nektos/act'
-      uses: docker/login-action@v4.2.0
+      uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
       with:
         registry: ghcr.io
         username: ${{ github.actor }}
@@ -185,7 +177,7 @@ jobs:
     - name: Extract Docker metadata
       if: github.actor != 'nektos/act'
       id: meta
-      uses: docker/metadata-action@v6.1.0
+      uses: docker/metadata-action@80c7e94dd9b9319bd5eb7a0e0fe9291e23a2a2e9 # v6.1.0
       with:
         images: ghcr.io/${{ github.repository }}
         tags: |
@@ -195,7 +187,7 @@ jobs:
           org.opencontainers.image.description=Kubernetes sidecar that detects MongoDB replica set primary and labels the pod with primary=true for service selection.
 
     - name: Build Docker image
-      uses: docker/build-push-action@v7.2.0
+      uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
       with:
         context: .
         file: ./Dockerfile.dist
@@ -217,7 +209,7 @@ jobs:
 
     steps:
     - name: Log in to GitHub Container Registry
-      uses: docker/login-action@v4.2.0
+      uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
       with:
         registry: ghcr.io
         username: ${{ github.actor }}
@@ -249,11 +241,11 @@ jobs:
 
     steps:
     - name: Checkout repository
-      uses: actions/checkout@v6.0.2
+      uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
     - name: Log in to GitHub Container Registry
       if: github.actor != 'nektos/act'
-      uses: docker/login-action@v4.2.0
+      uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
       with:
         registry: ghcr.io
         username: ${{ github.actor }}
@@ -264,10 +256,10 @@ jobs:
       run: docker pull "${{ needs.build-and-push.outputs.image_ref }}"
 
     - name: Set up kubectl
-      uses: azure/setup-kubectl@v5.1.0
+      uses: azure/setup-kubectl@829323503d1be3d00ca8346e5391ca0b07a9ab0d # v5.1.0
 
     - name: Set up kind
-      uses: helm/kind-action@v1.14.0
+      uses: helm/kind-action@ef37e7f390d99f746eb8b610417061a60e82a6cc # v1.14.0
       with:
         cluster_name: kind-mongo-labeler
         version: v0.31.0

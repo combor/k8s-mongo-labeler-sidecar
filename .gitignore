@@ -3,3 +3,7 @@ vendor
 .idea/*
 dist/
 .serena/
+.claude
+
+# Local build output (CLAUDE.md: go build -o k8s-mongo-labeler-sidecar main.go)
+/k8s-mongo-labeler-sidecar

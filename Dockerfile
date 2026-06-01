@@ -15,7 +15,7 @@ RUN --mount=type=cache,target=/go/pkg/mod,id=k8s-mongo-labeler-go-mod-cache \
 COPY *.go ./
 RUN --mount=type=cache,target=/go/pkg/mod,id=k8s-mongo-labeler-go-mod-cache \
     --mount=type=cache,target=/root/.cache/go-build,id=k8s-mongo-labeler-go-build-cache \
-    CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -o /primary-sidecar
+    CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -trimpath -ldflags="-s -w" -o /primary-sidecar
 
 FROM gcr.io/distroless/static-debian13:nonroot
 ARG TARGETOS
