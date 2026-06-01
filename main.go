@@ -259,6 +259,16 @@ func (l *Labeler) getMongoPrimary() (string, error) {
 		return "", fmt.Errorf("run hello command on mongo at %q: %w", l.Config.Address, err)
 	}
 
+	return parsePrimaryPodName(hello)
+}
+
+// parsePrimaryPodName extracts the primary pod name from a MongoDB "hello"
+// command response. It prefers the "primary" field and falls back to "me" when
+// the node reports itself as primary via "isWritablePrimary" or "ismaster". The
+// host is expected to be a "host:port" value whose host is a Kubernetes DNS name
+// (e.g. mongo-0.mongo.default.svc.cluster.local); the pod name is the first
+// dot-separated label.
+func parsePrimaryPodName(hello bson.M) (string, error) {
 	primaryHost, _ := hello["primary"].(string)
 	if primaryHost == "" {
 		if isWritablePrimary, ok := hello["isWritablePrimary"].(bool); ok && isWritablePrimary {

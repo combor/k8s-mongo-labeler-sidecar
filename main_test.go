@@ -10,6 +10,7 @@ import (
 	phuslog "github.com/phuslu/log"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.mongodb.org/mongo-driver/v2/bson"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -334,4 +335,66 @@ func TestSetPrimaryLabel_StopsAfterPatchError(t *testing.T) {
 
 	assert.Equal(t, []string{"mongo-0", "mongo-1"}, patchedPods)
 	assert.NotContains(t, patchedPods, "mongo-2")
+}
+
+func TestParsePrimaryPodName(t *testing.T) {
+	tests := []struct {
+		name        string
+		hello       bson.M
+		wantPod     string
+		wantErr     bool
+		errContains string
+	}{
+		{
+			name:    "primary field set to FQDN with port",
+			hello:   bson.M{"primary": "mongo-0.mongo.default.svc.cluster.local:27017"},
+			wantPod: "mongo-0",
+		},
+		{
+			name:    "primary empty, isWritablePrimary true, me set",
+			hello:   bson.M{"primary": "", "isWritablePrimary": true, "me": "mongo-1.mongo.default.svc.cluster.local:27017"},
+			wantPod: "mongo-1",
+		},
+		{
+			name:    "primary absent, ismaster true (no isWritablePrimary), me set",
+			hello:   bson.M{"ismaster": true, "me": "mongo-2.mongo.default.svc.cluster.local:27017"},
+			wantPod: "mongo-2",
+		},
+		{
+			name:        "secondary node: primary empty and neither flag true",
+			hello:       bson.M{"primary": "", "isWritablePrimary": false, "ismaster": false},
+			wantErr:     true,
+			errContains: "invalid primary host",
+		},
+		{
+			name:        "host missing port: SplitHostPort error",
+			hello:       bson.M{"primary": "mongo-0.mongo.default.svc.cluster.local"},
+			wantErr:     true,
+			errContains: "invalid primary host",
+		},
+		{
+			name:        "empty host with valid port: unable to derive pod name",
+			hello:       bson.M{"primary": ":27017"},
+			wantErr:     true,
+			errContains: "unable to derive primary pod name",
+		},
+		{
+			name:    "precedence: primary field wins over me",
+			hello:   bson.M{"primary": "mongo-0.mongo.default.svc.cluster.local:27017", "isWritablePrimary": true, "me": "mongo-9.mongo.default.svc.cluster.local:27017"},
+			wantPod: "mongo-0",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := parsePrimaryPodName(tt.hello)
+			if tt.wantErr {
+				require.ErrorContains(t, err, tt.errContains)
+				assert.Empty(t, got)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantPod, got)
+		})
+	}
 }
