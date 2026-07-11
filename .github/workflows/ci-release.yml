@@ -34,7 +34,7 @@ jobs:
         go-version-file: go.mod
 
     - name: Run golangci-lint
-      uses: golangci/golangci-lint-action@82606bf257cbaff209d206a39f5134f0cfbfd2ee # v9.2.1
+      uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
       with:
         version: v2.12.2
         args: --timeout=10m
@@ -81,7 +81,7 @@ jobs:
         go-version-file: go.mod
 
     - name: Run govulncheck
-      uses: golang/govulncheck-action@b625fbe08f3bccbe446d94fbf87fcc875a4f50ee # v1.0.4
+      uses: golang/govulncheck-action@032d45514ae346b1db93c04b0c90b841c370344f # v1.1.0
       with:
         go-package: ./...
         repo-checkout: false
@@ -177,7 +177,7 @@ jobs:
     - name: Extract Docker metadata
       if: github.actor != 'nektos/act'
       id: meta
-      uses: docker/metadata-action@80c7e94dd9b9319bd5eb7a0e0fe9291e23a2a2e9 # v6.1.0
+      uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
       with:
         images: ghcr.io/${{ github.repository }}
         tags: |
@@ -262,7 +262,7 @@ jobs:
       uses: helm/kind-action@ef37e7f390d99f746eb8b610417061a60e82a6cc # v1.14.0
       with:
         cluster_name: kind-mongo-labeler
-        version: v0.31.0
+        version: v0.32.0
         install_only: true
 
     - name: Run integration test
