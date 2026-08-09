@@ -139,7 +139,7 @@ spec:
           readOnly: true
       # Mongo labeler sidecar
       - name: labeler
-        image: ghcr.io/combor/k8s-mongo-labeler-sidecar:0.7.1
+        image: ghcr.io/combor/k8s-mongo-labeler-sidecar:0.7.2
         env:
         - name: LABEL_SELECTOR
           value: "role=mongo"
