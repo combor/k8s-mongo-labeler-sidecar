@@ -6,8 +6,8 @@ require (
 	github.com/phuslu/log v1.0.128
 	github.com/stretchr/testify v1.12.0
 	go.mongodb.org/mongo-driver/v2 v2.8.0
-	k8s.io/api v0.36.3
-	k8s.io/apimachinery v0.36.3
+	k8s.io/api v0.36.4
+	k8s.io/apimachinery v0.36.4
 	k8s.io/client-go v0.36.3
 )
 
