@@ -189,7 +189,7 @@ authentication_rejected() {
 }
 
 verify_invalid_password() {
-  local since start deadline pod label ip count retries retrying
+  local since start deadline pod label ip count retries retrying=false rejected=false
   since="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
   start=${SECONDS}
   deadline=$((start + 90))
@@ -206,20 +206,24 @@ verify_invalid_password() {
       fail 'invalid credentials reached pod patching'
     fi
     # Count only entries logged after bootstrap, when every member had already
-    # authenticated the correct user for replica-set setup.
+    # authenticated the correct user. The driver pauses its pool after the first
+    # rejection and reports that instead of a fresh one, so both categories count
+    # as a failed retry; authentication_rejected is what proves the rejection.
     check_logs "${since}"
     retrying=true
     for pod in "${pods[@]}"; do
-      retries="$(grep -c 'authentication_failed' "${temp_dir}/${pod}.recent.log" || true)"
+      retries="$(grep -Ec 'authentication_failed|connection_pool_unavailable' "${temp_dir}/${pod}.recent.log" || true)"
       (( retries >= 2 )) || retrying=false
     done
-    if (( SECONDS - start >= 15 )) && [[ "${retrying}" == true ]] && authentication_rejected "${since}"; then
+    rejected=false
+    if authentication_rejected "${since}"; then rejected=true; fi
+    if (( SECONDS - start >= 15 )) && [[ "${retrying}" == true && "${rejected}" == true ]]; then
       echo 'PASS: every sidecar rejected the password and kept failing without patching labels'
       return
     fi
     sleep 2
   done
-  fail 'sidecars did not report authentication rejection followed by failed retries'
+  fail "sidecars did not report authentication rejection followed by failed retries (rejected=${rejected}, retrying=${retrying})"
 }
 
 run docker info
