@@ -149,6 +149,20 @@ spec:
               fieldPath: metadata.namespace
         - name: MONGO_ADDRESS
           value: "localhost:27017"
+        # For an authenticated MongoDB deployment, supply an existing Secret.
+        # Do not also put credentials in MONGO_ADDRESS. Restart after rotation.
+        # - name: MONGO_USERNAME
+        #   valueFrom:
+        #     secretKeyRef:
+        #       name: mongo-labeler-auth
+        #       key: username
+        # - name: MONGO_PASSWORD
+        #   valueFrom:
+        #     secretKeyRef:
+        #       name: mongo-labeler-auth
+        #       key: password
+        # - name: MONGO_AUTH_SOURCE
+        #   value: "admin"
         - name: K8S_REQUEST_TIMEOUT
           value: "10s"
         - name: LABEL_ALL

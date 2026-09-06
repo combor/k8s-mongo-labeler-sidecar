@@ -28,7 +28,7 @@ type envState struct {
 func setConfigEnv(t *testing.T, env map[string]string) {
 	t.Helper()
 
-	keys := []string{"LABEL_SELECTOR", "NAMESPACE", "MONGO_ADDRESS", "LABEL_ALL", "DEBUG", "K8S_REQUEST_TIMEOUT"}
+	keys := []string{"LABEL_SELECTOR", "NAMESPACE", "MONGO_ADDRESS", "MONGO_USERNAME", "MONGO_PASSWORD", "MONGO_AUTH_SOURCE", "LABEL_ALL", "DEBUG", "K8S_REQUEST_TIMEOUT"}
 	original := make(map[string]envState, len(keys))
 	for _, key := range keys {
 		value, ok := os.LookupEnv(key)
@@ -195,6 +195,8 @@ func TestGetConfigFromEnvironment(t *testing.T) {
 				assert.ErrorContains(t, err, tt.expectedErrorContains)
 			} else {
 				require.NoError(t, err)
+				require.NotNil(t, config.mongoOptions)
+				config.mongoOptions = nil // Connection settings have dedicated tests.
 				assert.Equal(t, tt.expectedConfig, config)
 			}
 		})
@@ -665,7 +667,9 @@ func TestGetMongoPrimary(t *testing.T) {
 			},
 		}
 		_, err := l.getMongoPrimary()
-		require.ErrorContains(t, err, "invalid primary host")
+		require.ErrorContains(t, err, "parse_primary")
+		var failure *mongoFailure
+		require.ErrorAs(t, err, &failure)
 	})
 }
 

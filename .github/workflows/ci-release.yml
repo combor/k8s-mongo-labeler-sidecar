@@ -89,7 +89,7 @@ jobs:
   release:
     name: Release binaries
     runs-on: ubuntu-latest
-    needs: [lint, test-coverage, govulncheck]
+    needs: [lint, test-coverage, govulncheck, integration-test]
     if: (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')) || github.actor == 'nektos/act'
     timeout-minutes: 20
     permissions:
@@ -230,30 +230,22 @@ jobs:
           "${IMAGE}:${TAG}-amd64" "${IMAGE}:${TAG}-arm64"
 
   integration-test:
-    name: Integration test
+    name: Integration test (${{ matrix.auth }})
     runs-on: ubuntu-latest
-    needs: build-and-push
-    if: (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')) || github.actor == 'nektos/act'
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        auth: [none, env, uri, invalid]
     permissions:
       contents: read
-      packages: read
 
     steps:
     - name: Checkout repository
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-    - name: Log in to GitHub Container Registry
-      if: github.actor != 'nektos/act'
-      uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
-      with:
-        registry: ghcr.io
-        username: ${{ github.actor }}
-        password: ${{ secrets.GITHUB_TOKEN }}
-
-    - name: Pull CI image
-      if: github.actor != 'nektos/act'
-      run: docker pull "${{ needs.build-and-push.outputs.image_ref }}"
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
 
     - name: Set up kubectl
       uses: azure/setup-kubectl@829323503d1be3d00ca8346e5391ca0b07a9ab0d # v5.1.0
@@ -261,12 +253,14 @@ jobs:
     - name: Set up kind
       uses: helm/kind-action@06c1ae10762d3b9c1644e7fe69596ae519e015a2 # v1.15.0
       with:
-        cluster_name: kind-mongo-labeler
         version: v0.33.0
         install_only: true
 
     - name: Run integration test
       env:
-        LABELER_IMAGE: ${{ needs.build-and-push.outputs.image_ref }}
-        USE_PREBUILT_IMAGE: "true"
+        MONGO_AUTH_MODE: ${{ matrix.auth }}
+        CLUSTER_NAME: mongo-labeler-${{ github.run_id }}-${{ strategy.job-index }}
+        KUBECONFIG: ${{ runner.temp }}/mongo-labeler-${{ strategy.job-index }}.kubeconfig
+        LABELER_IMAGE: mongo-labeler:ci-${{ github.run_id }}-${{ strategy.job-index }}
+        USE_PREBUILT_IMAGE: "false"
       run: ./test/integration/run.sh
