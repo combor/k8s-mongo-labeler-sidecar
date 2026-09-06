@@ -7,6 +7,3 @@ dist/
 
 # Local build output (go build -o k8s-mongo-labeler-sidecar .)
 /k8s-mongo-labeler-sidecar
-
-# Python integration harness bytecode
-__pycache__/

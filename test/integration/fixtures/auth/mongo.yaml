@@ -1,0 +1,45 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mongo
+spec:
+  # Bootstrap needs all members running and resolvable before readiness.
+  podManagementPolicy: Parallel
+  template:
+    spec:
+      containers:
+      - name: mongo
+        env:
+        - name: MONGO_TEST_USERNAME
+          valueFrom:
+            secretKeyRef:
+              name: mongo-auth
+              key: username
+        - name: MONGO_TEST_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: mongo-auth
+              key: password
+        volumeMounts:
+        - name: mongo-auth
+          mountPath: /run/mongo-auth
+          readOnly: true
+        readinessProbe:
+          exec:
+            command: [test, -f, /tmp/mongo-auth-ready]
+          periodSeconds: 2
+      volumes:
+      - name: mongo-auth
+        secret:
+          secretName: mongo-auth
+          defaultMode: 0400
+          items:
+          - key: keyfile
+            path: keyfile
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mongo-cluster
+spec:
+  publishNotReadyAddresses: true

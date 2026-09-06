@@ -99,6 +99,9 @@ docker pull ghcr.io/combor/k8s-mongo-labeler-sidecar:0.7.2
 ## Integration test (kind)
 
 The repository includes an end-to-end test environment in `test/integration`.
+The checked-in Kustomize overlays in `test/integration/fixtures` define each
+scenario and share the deployment example as their base. The Bash runner applies
+the selected overlay, sets the local image, and starts the three MongoDB pods.
 
 Prerequisites:
 
@@ -107,7 +110,6 @@ Prerequisites:
 - [Docker](https://www.docker.com/) with a running daemon
 - [Buildx](https://github.com/docker/buildx) with BuildKit
 - Bash
-- Python 3 (standard library only)
 
 Use a disposable `CLUSTER_NAME` and dedicated `KUBECONFIG`; the script deletes its named cluster.
 
@@ -137,7 +139,8 @@ checks that every sidecar repeatedly fails authentication without patching any
 labels. All scenarios run the sidecar with debug logging enabled. The harness
 checks logs for generated credentials and their encoded forms before printing
 diagnostics; MongoDB server logs are not printed because they can contain
-usernames. Generated Secrets stay inside the disposable cluster.
+usernames. Temporary credential files are removed during cleanup; generated
+Secrets are deleted with the disposable cluster.
 
 CI runs all four scenarios against the current source on pull requests and
 before releases. To run an authenticated scenario locally, use
