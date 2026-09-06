@@ -9,9 +9,9 @@ This sidecar detects the current MongoDB replica set primary and labels Kubernet
 
 ## How it works
 
-Every 5 seconds the sidecar:
+At startup and on a 5-second timer, the sidecar:
 
-1. Connects to MongoDB (`MONGO_ADDRESS`, default `localhost:27017`).
+1. Queries MongoDB's `hello` command at `MONGO_ADDRESS` (default `localhost:27017`).
 2. Detects the primary pod name.
 3. Lists pods in `NAMESPACE` matching `LABEL_SELECTOR`.
 4. Patches labels:
@@ -19,7 +19,9 @@ Every 5 seconds the sidecar:
    - other pods: `primary=false` when `LABEL_ALL=true`
    - other pods: removes `primary` label when `LABEL_ALL=false`
 
-It uses Kubernetes `Patch` (strategic merge), not full-object `Update`.
+It patches changed labels only, demoting other pods before promoting the primary.
+
+Member hostnames must start with their pod name, for example `mongo-0.mongo-cluster:27017`.
 
 ## Service selector example
 
@@ -46,9 +48,9 @@ Environment variables:
 
 | Variable | Required | Default | Description |
 | --- | --- | --- | --- |
-| `LABEL_SELECTOR` | yes | none | Pod label selector (for example `role=mongo`). |
+| `LABEL_SELECTOR` | yes | none | Selector for all pods in one replica set (for example `role=mongo`). |
 | `NAMESPACE` | no | `default` | Namespace where pods are listed and patched. |
-| `MONGO_ADDRESS` | no | `localhost:27017` | MongoDB endpoint used for primary detection. |
+| `MONGO_ADDRESS` | no | `localhost:27017` | MongoDB endpoint, without the `mongodb://` prefix. |
 | `K8S_REQUEST_TIMEOUT` | no | `10s` | Timeout for Kubernetes list/patch API requests (Go duration format, for example `5s`, `1m`). |
 | `LABEL_ALL` | no | `false` | Boolean. If `true`, non-primary pods get `primary=false`; if `false`, the label is removed. |
 | `DEBUG` | no | `false` | Boolean. If `true`, enables debug logging. |
@@ -59,7 +61,7 @@ Environment variables:
 
 Container images are published to GHCR at:
 
-`ghcr.io/combor/k8s-mongo-labeler-sidecar`
+`ghcr.io/combor/k8s-mongo-labeler-sidecar`, for `linux/amd64` and `linux/arm64`.
 
 ```bash
 docker pull ghcr.io/combor/k8s-mongo-labeler-sidecar:0.7.2
@@ -67,9 +69,9 @@ docker pull ghcr.io/combor/k8s-mongo-labeler-sidecar:0.7.2
 
 ## Deployment
 
-`deployment-example.yaml` can be used as an example deployment manifest.
+[deployment-example.yaml](deployment-example.yaml) provides a three-member replica-set example.
 
-> **Note:** the example runs MongoDB **without authentication or TLS** and is intended for demonstration only. The bundled `NetworkPolicy` limits access to port 27017 to pods in the same namespace, but it is only enforced by CNIs that implement NetworkPolicy. Before production use, enable MongoDB authentication (keyFile/SCRAM) and TLS, and review the resource limits and security contexts.
+> **Demo only:** MongoDB has no authentication or TLS; `emptyDir` data is lost when pods are removed. Configure authentication, TLS, and persistent storage for production. The NetworkPolicy limits ingress to same-namespace traffic on port 27017 only when enforced by the CNI.
 
 ## Integration test (kind)
 
@@ -79,11 +81,11 @@ Prerequisites:
 
 - [kind](https://kind.sigs.k8s.io/)
 - [kubectl](https://kubernetes.io/docs/reference/kubectl/)
-- [Docker](https://www.docker.com/)
-- [BuildKit](https://github.com/moby/buildkit)
-- [Buildx](https://github.com/docker/buildx)
+- [Docker](https://www.docker.com/) with a running daemon
+- [Buildx](https://github.com/docker/buildx) with BuildKit
+- Bash
 
-Run:
+Use a disposable `CLUSTER_NAME` and dedicated `KUBECONFIG`; the script deletes its named cluster.
 
 ```bash
 ./test/integration/run.sh
@@ -93,8 +95,8 @@ Optional overrides:
 
 - `CLUSTER_NAME` (default `kind-mongo-labeler`)
 - `LABELER_IMAGE` (default `mongo-labeler:local`)
-- `USE_PREBUILT_IMAGE` (default `false`) — skip building and use an existing image
-- `TIMEOUT` (default `240s`)
+- `USE_PREBUILT_IMAGE` (default `false`) — use local `LABELER_IMAGE`, falling back to the official `latest` tag if absent
+- `TIMEOUT` (default `240s`) — rollout timeout; labels have a separate 180-second timeout
 - `KEEP_CLUSTER=true` (keep cluster for debugging)
 
 The script creates a temporary kind cluster, deploys a 3-pod Mongo StatefulSet and verifies that exactly one pod has `primary=true` while non-primary pods have `primary=false`. It also verifies that the `mongo` Service routes to the primary pod via EndpointSlice.
