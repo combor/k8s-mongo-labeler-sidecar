@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Go sidecar that detects the MongoDB replica-set primary and patches Kubernetes Pod labels for service routing. Code and unit tests are in `main.go` and `main_test.go`.
+Go sidecar that detects the MongoDB replica-set primary and patches Kubernetes Pod labels for service routing. Runtime code and unit tests are in the root Go package.
 
 ## Behavioral contracts
 

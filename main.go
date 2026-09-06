@@ -33,6 +33,7 @@ type Config struct {
 	LabelAll          bool
 	LogLevel          phuslog.Level
 	K8sRequestTimeout time.Duration
+	mongoOptions      *options.ClientOptions
 }
 
 type Labeler struct {
@@ -234,6 +235,12 @@ func getConfigFromEnvironment() (*Config, error) {
 		return nil, err
 	}
 	config.K8sRequestTimeout = timeout
+	config.mongoOptions, err = mongoOptionsFromEnvironment(config.Address)
+	if err != nil {
+		return nil, err
+	}
+	// Narrow Address to the host so nothing downstream can log a URI credential.
+	config.Address = config.mongoOptions.Hosts[0]
 
 	return config, nil
 }
@@ -254,7 +261,7 @@ func envBool(key string, def bool) (bool, error) {
 	}
 	parsed, err := strconv.ParseBool(v)
 	if err != nil {
-		return false, fmt.Errorf("invalid %s value %q: %w", key, v, err)
+		return false, fmt.Errorf("invalid %s value: expected a boolean", key)
 	}
 	return parsed, nil
 }
@@ -267,7 +274,7 @@ func envDuration(key string, def time.Duration) (time.Duration, error) {
 	}
 	parsed, err := time.ParseDuration(v)
 	if err != nil {
-		return 0, fmt.Errorf("invalid %s value %q: %w", key, v, err)
+		return 0, fmt.Errorf("invalid %s value: expected a duration", key)
 	}
 	return parsed, nil
 }
@@ -338,7 +345,11 @@ func (l *Labeler) getMongoPrimary() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return parsePrimaryPodName(hello)
+	primary, err := parsePrimaryPodName(hello)
+	if err != nil {
+		return "", newMongoFailure("parse_primary", err)
+	}
+	return primary, nil
 }
 
 // fetchHello lazily connects a single long-lived MongoDB client on first use and
@@ -347,27 +358,22 @@ func (l *Labeler) getMongoPrimary() (string, error) {
 // decoded "hello" command response.
 func (l *Labeler) fetchHello(ctx context.Context) (bson.M, error) {
 	if l.mongoClient == nil {
-		clientOptions := options.Client().
-			ApplyURI("mongodb://" + l.Config.Address).
-			SetDirect(true).
-			SetMinPoolSize(1).
-			SetMaxPoolSize(1)
-		client, err := mongo.Connect(clientOptions)
+		client, err := mongo.Connect(l.Config.mongoOptions)
 		if err != nil {
-			return nil, fmt.Errorf("connect to mongo at %q: %w", l.Config.Address, err)
+			return nil, newMongoFailure("connect", err)
 		}
 		l.mongoClient = client
 	}
 
 	if err := l.mongoClient.Ping(ctx, nil); err != nil {
-		return nil, fmt.Errorf("ping mongo at %q: %w", l.Config.Address, err)
+		return nil, newMongoFailure("ping", err)
 	}
 
 	var hello bson.M
 	if err := l.mongoClient.Database("admin").
 		RunCommand(ctx, bson.D{{Key: "hello", Value: 1}}).
 		Decode(&hello); err != nil {
-		return nil, fmt.Errorf("run hello command on mongo at %q: %w", l.Config.Address, err)
+		return nil, newMongoFailure("hello", err)
 	}
 	return hello, nil
 }
@@ -379,7 +385,7 @@ func (l *Labeler) closeMongo(ctx context.Context) {
 		return
 	}
 	if err := l.mongoClient.Disconnect(ctx); err != nil {
-		phuslog.Debug().Msgf("unable to close mongo connection: %v", err)
+		phuslog.Debug().Err(newMongoFailure("disconnect", err)).Msg("unable to close mongo connection")
 	}
 	l.mongoClient = nil
 }
@@ -410,6 +416,18 @@ func parsePrimaryPodName(hello bson.M) (string, error) {
 	return "", fmt.Errorf("unable to derive primary pod name from host %q", host)
 }
 
+func logConfiguration(config *Config) {
+	phuslog.Info().
+		Str("namespace", config.Namespace).
+		Str("label_selector", config.LabelSelector).
+		Str("mongo_address", config.Address).
+		Bool("mongo_auth_enabled", config.mongoOptions.Auth != nil).
+		Bool("label_all", config.LabelAll).
+		Str("log_level", config.LogLevel.String()).
+		Dur("k8s_request_timeout", config.K8sRequestTimeout).
+		Msg("starting with configuration")
+}
+
 func main() {
 	phuslog.DefaultLogger = configureLogger(phuslog.InfoLevel)
 
@@ -418,14 +436,7 @@ func main() {
 		phuslog.Fatal().Err(err).Msg("failed to read configuration")
 	}
 	phuslog.DefaultLogger = configureLogger(config.LogLevel)
-	phuslog.Info().
-		Str("namespace", config.Namespace).
-		Str("label_selector", config.LabelSelector).
-		Str("mongo_address", config.Address).
-		Bool("label_all", config.LabelAll).
-		Str("log_level", config.LogLevel.String()).
-		Dur("k8s_request_timeout", config.K8sRequestTimeout).
-		Msg("starting with configuration")
+	logConfiguration(config)
 
 	labeler, err := New(config)
 	if err != nil {

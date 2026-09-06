@@ -50,12 +50,36 @@ Environment variables:
 | --- | --- | --- | --- |
 | `LABEL_SELECTOR` | yes | none | Selector for all pods in one replica set (for example `role=mongo`). |
 | `NAMESPACE` | no | `default` | Namespace where pods are listed and patched. |
-| `MONGO_ADDRESS` | no | `localhost:27017` | MongoDB endpoint, without the `mongodb://` prefix. |
+| `MONGO_ADDRESS` | no | `localhost:27017` | Single MongoDB endpoint, optionally prefixed with `mongodb://`. URI credentials and connection options are supported. SRV and multiple hosts are unsupported because the sidecar connects directly to its local member. |
+| `MONGO_USERNAME` | no | unset | MongoDB username, supplied together with `MONGO_PASSWORD`. |
+| `MONGO_PASSWORD` | no | unset | MongoDB password, supplied together with `MONGO_USERNAME`. Both values must be nonempty and are passed literally; do not URL-encode them. |
+| `MONGO_AUTH_SOURCE` | no | URI source/database, then `admin` | Database where the user account was created. Requires the environment credential pair. Overrides URI `authSource`, which otherwise takes precedence over the URI database. |
 | `K8S_REQUEST_TIMEOUT` | no | `10s` | Timeout for Kubernetes list/patch API requests (Go duration format, for example `5s`, `1m`). |
 | `LABEL_ALL` | no | `false` | Boolean. If `true`, non-primary pods get `primary=false`; if `false`, the label is removed. |
 | `DEBUG` | no | `false` | Boolean. If `true`, enables debug logging. |
 
 `LABEL_ALL` and `DEBUG` are parsed as booleans. `K8S_REQUEST_TIMEOUT` is parsed as a Go duration. Invalid values fail startup.
+
+Supply `MONGO_USERNAME` and `MONGO_PASSWORD` from Kubernetes Secrets using
+`valueFrom.secretKeyRef`; the deployment example includes commented entries.
+Alternatively, supply the entire `MONGO_ADDRESS` from a Secret, with URI-encoded
+credentials. The two inputs are mutually exclusive: when any of the three
+authentication variables is set, a `MONGO_ADDRESS` that carries user info,
+`authMechanism`, or `authMechanismProperties` fails startup, as does an
+explicitly empty `MONGO_AUTH_SOURCE`.
+
+Environment credentials always use the MongoDB driver's default SCRAM
+negotiation; pin a mechanism through URI credentials instead. Restart the sidecar
+after rotating credentials or changing Secret-backed environment variables.
+MongoDB users are provisioned separately; the sidecar only runs `ping` and
+`hello`, which require no database roles. Those commands are also available
+without authentication, so successful primary detection alone does not prove that
+credentials were configured.
+
+Logs never carry credentials: startup reports the MongoDB host/port and whether
+authentication is configured, failures report an operation, a fixed category, and
+any server code, and driver logging through `MONGODB_LOG_*` stays suppressed even
+when `DEBUG=true`.
 
 ## Published image
 
@@ -76,6 +100,8 @@ docker pull ghcr.io/combor/k8s-mongo-labeler-sidecar:0.7.2
 ## Integration test (kind)
 
 The repository includes an end-to-end test environment in `test/integration`.
+The checked-in Kustomize overlays in `test/integration/fixtures` define each
+scenario and share the deployment example as their base.
 
 Prerequisites:
 
@@ -95,11 +121,35 @@ Optional overrides:
 
 - `CLUSTER_NAME` (default `kind-mongo-labeler`)
 - `LABELER_IMAGE` (default `mongo-labeler:local`)
-- `USE_PREBUILT_IMAGE` (default `false`) — use local `LABELER_IMAGE`, falling back to the official `latest` tag if absent
+- `USE_PREBUILT_IMAGE` (default `false`) — use an existing local `LABELER_IMAGE`; a missing image fails the test
+- `MONGO_AUTH_MODE` (default `none`) — `none`, `env`, `uri`, or `invalid` (wrong password)
+- `MONGO_GLIBC_TUNABLES` (default unset) — optional `GLIBC_TUNABLES` override for MongoDB test containers only
 - `TIMEOUT` (default `240s`) — rollout timeout; labels have a separate 180-second timeout
 - `KEEP_CLUSTER=true` (keep cluster for debugging)
 
-The script creates a temporary kind cluster, deploys a 3-pod Mongo StatefulSet and verifies that exactly one pod has `primary=true` while non-primary pods have `primary=false`. It also verifies that the `mongo` Service routes to the primary pod via EndpointSlice.
+The script creates a temporary kind cluster, deploys the locally built sidecar
+image in a 3-pod Mongo StatefulSet, and verifies primary labels and Service
+routing via EndpointSlice. It refuses to delete a pre-existing cluster with the
+chosen name. When `KUBECONFIG` is unset, it uses a temporary kubeconfig.
+
+The `env` and `uri` scenarios enforce MongoDB authentication using a generated
+replica-set keyfile and test user, then test the respective credential inputs.
+The `invalid` scenario starts fresh, unlabeled pods with the wrong password and
+checks that every sidecar repeatedly fails authentication without patching any
+labels. All scenarios run the sidecar with debug logging enabled. Sidecar logs
+are scanned for the generated credentials before any diagnostics are printed;
+MongoDB server logs are only matched, never printed, because they contain
+usernames.
+
+CI runs all four scenarios against the current source on pull requests and
+before releases. To run an authenticated scenario locally, use
+`MONGO_AUTH_MODE=env CLUSTER_NAME=mongo-labeler-auth-env ./test/integration/run.sh`.
+
+MongoDB 8.3.8 can refuse to start on newer Linux kernels due to its TCMalloc/rseq
+compatibility check. On an affected host, pass the workaround the Docker image
+maintainers describe — `MONGO_GLIBC_TUNABLES=glibc.pthread.rseq=1` — which
+applies only to the test containers. See the
+[upstream discussion](https://github.com/docker-library/mongo/discussions/748).
 
 ## Run CI locally with act
 
