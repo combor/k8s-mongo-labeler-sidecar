@@ -46,18 +46,25 @@ func assertNoMongoSecrets(t *testing.T, text string) {
 
 func TestMongoAuthenticationConfiguration(t *testing.T) {
 	userinfo := url.UserPassword(testMongoUser, testMongoPassword).String()
+	// Read-only: the subtests copy this into the environment map they build.
+	credentials := map[string]string{"MONGO_USERNAME": testMongoUser, "MONGO_PASSWORD": testMongoPassword}
 	tests := []struct {
-		name    string
-		address string
-		env     map[string]string
-		source  string
+		name      string
+		address   string
+		env       map[string]string
+		source    string
+		mechanism string
+		appName   string
 	}{
 		{name: "unauthenticated default"},
-		{name: "environment credentials", env: map[string]string{"MONGO_USERNAME": testMongoUser, "MONGO_PASSWORD": testMongoPassword}, source: "admin"},
-		{name: "database fallback", address: "mongo:27017/application", env: map[string]string{"MONGO_USERNAME": testMongoUser, "MONGO_PASSWORD": testMongoPassword}, source: "application"},
-		{name: "URI source", address: "mongo:27017/application?authSource=users", env: map[string]string{"MONGO_USERNAME": testMongoUser, "MONGO_PASSWORD": testMongoPassword}, source: "users"},
+		{name: "environment credentials", env: credentials, source: "admin"},
+		{name: "database fallback", address: "mongo:27017/application", env: credentials, source: "application"},
+		{name: "URI source", address: "mongo:27017/application?authSource=users", env: credentials, source: "users"},
+		// The driver lowercases option names, so the sidecar must match them the same way.
+		{name: "lowercase URI source", address: "mongo:27017/application?authsource=users", env: credentials, source: "users"},
 		{name: "environment source takes precedence", address: "mongodb://mongo:27017/application?authSource=users", env: map[string]string{"MONGO_USERNAME": testMongoUser, "MONGO_PASSWORD": testMongoPassword, "MONGO_AUTH_SOURCE": "accounts"}, source: "accounts"},
-		{name: "explicit SCRAM with environment credentials", address: "mongo:27017/?authMechanism=SCRAM-SHA-256&appName=labeler", env: map[string]string{"MONGO_USERNAME": testMongoUser, "MONGO_PASSWORD": testMongoPassword}, source: "admin"},
+		{name: "URI options with environment credentials", address: "mongo:27017/?appName=labeler", env: credentials, source: "admin", appName: "labeler"},
+		{name: "explicit SCRAM with URI credentials", address: "mongodb://" + userinfo + "@mongo:27017/?authSource=users&authMechanism=SCRAM-SHA-256", source: "users", mechanism: "SCRAM-SHA-256"},
 		{name: "legacy credentials", address: userinfo + "@mongo:27017/application?authSource=users", source: "users"},
 		{name: "full URI credentials", address: "mongodb://" + userinfo + "@mongo:27017/application", source: "application"},
 		{name: "IPv6 URI", address: "mongodb://" + userinfo + "@[::1]:27017/?authSource=users", source: "users"},
@@ -90,9 +97,11 @@ func TestMongoAuthenticationConfiguration(t *testing.T) {
 				assert.Equal(t, testMongoPassword, opts.Auth.Password)
 				assert.Equal(t, tt.source, opts.Auth.AuthSource)
 			}
-			if tt.name == "explicit SCRAM with environment credentials" {
-				assert.Equal(t, "SCRAM-SHA-256", opts.Auth.AuthMechanism)
-				assert.Equal(t, "labeler", *opts.AppName)
+			if tt.mechanism != "" {
+				assert.Equal(t, tt.mechanism, opts.Auth.AuthMechanism)
+			}
+			if tt.appName != "" {
+				assert.Equal(t, tt.appName, *opts.AppName)
 			}
 			for _, level := range []phuslog.Level{phuslog.InfoLevel, phuslog.DebugLevel} {
 				logs := captureLogs(t, level)
@@ -118,6 +127,8 @@ func TestMongoConfigurationErrorsDoNotExposeValues(t *testing.T) {
 		{"source without credentials", map[string]string{"MONGO_AUTH_SOURCE": testMongoPassword}},
 		{"empty source", map[string]string{"MONGO_USERNAME": testMongoUser, "MONGO_PASSWORD": testMongoPassword, "MONGO_AUTH_SOURCE": ""}},
 		{"mixed credentials", map[string]string{"MONGO_ADDRESS": userinfo + "@mongo:27017", "MONGO_USERNAME": testMongoUser, "MONGO_PASSWORD": testMongoPassword}},
+		{"URI mechanism with environment credentials", map[string]string{"MONGO_ADDRESS": "mongo:27017/?authMechanism=SCRAM-SHA-256", "MONGO_USERNAME": testMongoUser, "MONGO_PASSWORD": testMongoPassword}},
+		{"URI mechanism properties with environment credentials", map[string]string{"MONGO_ADDRESS": "mongo:27017/?authMechanismProperties=SERVICE_NAME:mongodb", "MONGO_USERNAME": testMongoUser, "MONGO_PASSWORD": testMongoPassword}},
 		{"URI and environment source", map[string]string{"MONGO_ADDRESS": userinfo + "@mongo:27017", "MONGO_AUTH_SOURCE": "admin"}},
 		{"malformed credential escape", map[string]string{"MONGO_ADDRESS": testMongoUser + ":%invalid@mongo:27017"}},
 		{"option contains password", map[string]string{"MONGO_ADDRESS": "mongo:27017/?connectTimeoutMS=" + url.QueryEscape(testMongoPassword)}},
@@ -125,6 +136,8 @@ func TestMongoConfigurationErrorsDoNotExposeValues(t *testing.T) {
 		{"unsupported scheme", map[string]string{"MONGO_ADDRESS": "https://" + userinfo + "@mongo:27017"}},
 		{"SRV", map[string]string{"MONGO_ADDRESS": "mongodb+srv://" + userinfo + "@mongo.invalid"}},
 		{"multiple hosts", map[string]string{"MONGO_ADDRESS": userinfo + "@mongo:27017,other:27017"}},
+		// Only rejected once combined with the direct connection the sidecar sets.
+		{"load balanced", map[string]string{"MONGO_ADDRESS": "mongo:27017/?loadBalanced=true"}},
 		{"empty address", map[string]string{"MONGO_ADDRESS": ""}},
 		{"invalid boolean", map[string]string{"DEBUG": testMongoPassword}},
 		{"invalid duration", map[string]string{"K8S_REQUEST_TIMEOUT": testMongoPassword}},
@@ -168,32 +181,38 @@ func TestMongoFailureLogging(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			for _, operation := range []string{"connect", "ping", "hello", "disconnect"} {
-				nested := fmt.Errorf("%s: %w", testMongoPassword, tt.cause)
-				failure := newMongoFailure(operation, "mongo:27017", nested)
-				require.ErrorIs(t, failure, nested)
-				var commandCause mongo.CommandError
-				if errors.As(tt.cause, &commandCause) {
-					var original mongo.CommandError
-					require.ErrorAs(t, failure, &original)
-					assert.Equal(t, tt.code, original.Code)
-				}
-				assert.Equal(t, tt.category, failure.category)
-				assert.Equal(t, tt.code, failure.code)
-				var decoded *mongoFailure
-				require.ErrorAs(t, failure, &decoded)
-				for _, level := range []phuslog.Level{phuslog.InfoLevel, phuslog.DebugLevel} {
-					logs := captureLogs(t, level)
-					phuslog.Error().Err(fmt.Errorf("resolve primary: %w", failure)).Msg("failed to set primary label")
-					phuslog.Debug().Err(failure).Msg("MongoDB failure")
-					assert.Contains(t, logs.String(), tt.category)
-					assert.Contains(t, logs.String(), operation)
-					assertNoMongoSecrets(t, logs.String())
-					assertNoMongoSecrets(t, fmt.Sprintf("%+v", failure))
-				}
+			nested := fmt.Errorf("%s: %w", testMongoPassword, tt.cause)
+			failure := newMongoFailure("ping", nested)
+			require.ErrorIs(t, failure, nested)
+			var commandCause mongo.CommandError
+			if errors.As(tt.cause, &commandCause) {
+				var original mongo.CommandError
+				require.ErrorAs(t, failure, &original)
+				assert.Equal(t, tt.code, original.Code)
+			}
+			assert.Equal(t, tt.category, failure.category)
+			assert.Equal(t, tt.code, failure.code)
+			var decoded *mongoFailure
+			require.ErrorAs(t, failure, &decoded)
+			assertNoMongoSecrets(t, fmt.Sprintf("%+v", failure))
+			for _, level := range []phuslog.Level{phuslog.InfoLevel, phuslog.DebugLevel} {
+				logs := captureLogs(t, level)
+				phuslog.Error().Err(fmt.Errorf("resolve primary: %w", failure)).Msg("failed to set primary label")
+				phuslog.Debug().Err(failure).Msg("MongoDB failure")
+				assert.Contains(t, logs.String(), tt.category)
+				assert.Contains(t, logs.String(), "ping")
+				assertNoMongoSecrets(t, logs.String())
 			}
 		})
 	}
+
+	t.Run("every operation is named without leaking the cause", func(t *testing.T) {
+		for _, operation := range []string{"connect", "ping", "hello", "disconnect", "parse_primary"} {
+			failure := newMongoFailure(operation, errors.New(testMongoPassword))
+			assert.Contains(t, failure.Error(), operation)
+			assertNoMongoSecrets(t, failure.Error())
+		}
+	})
 }
 
 type failingMongoDialer struct{}

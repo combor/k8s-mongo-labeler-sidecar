@@ -128,8 +128,6 @@ jobs:
     permissions:
       contents: read
       packages: write
-    outputs:
-      image_ref: ${{ steps.image.outputs.image_ref }}
 
     steps:
     - name: Checkout repository
@@ -165,14 +163,12 @@ jobs:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
 
-    - name: Set integration image ref
+    # act cannot push, so it tags the image locally instead of using the
+    # registry metadata below.
+    - name: Set local image ref for act
+      if: github.actor == 'nektos/act'
       id: image
-      run: |
-        if [[ "${GITHUB_ACTOR}" == "nektos/act" ]]; then
-          echo "image_ref=mongo-labeler:ci-local" >> "$GITHUB_OUTPUT"
-        else
-          echo "image_ref=ghcr.io/${GITHUB_REPOSITORY,,}:sha-${GITHUB_SHA}-amd64" >> "$GITHUB_OUTPUT"
-        fi
+      run: echo "image_ref=mongo-labeler:ci-local" >> "$GITHUB_OUTPUT"
 
     - name: Extract Docker metadata
       if: github.actor != 'nektos/act'

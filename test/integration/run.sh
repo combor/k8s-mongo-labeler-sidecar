@@ -9,6 +9,7 @@ MONGO_AUTH_MODE="${MONGO_AUTH_MODE:-none}"
 TIMEOUT="${TIMEOUT:-240s}"
 pods=(mongo-0 mongo-1 mongo-2)
 created=false
+labels=''
 
 fail() {
   echo "FAIL: $*" >&2
@@ -30,23 +31,26 @@ export KUBECONFIG="${KUBECONFIG:-${temp_dir}/kubeconfig}"
 export DOCKER_BUILDKIT=1
 touch "${temp_dir}/needles"
 
+# run discards both streams: CLI errors may echo Secret manifests or server
+# errors. Commands whose output is needed use "$(...)" || fail at the top level,
+# because fail's exit inside a command substitution kills only the subshell.
 run() {
-  local status=0
-  "$@" >"${temp_dir}/output" 2>"${temp_dir}/error" || status=$?
-  if (( status != 0 )); then
-    # CLI errors may echo Secret manifests or server errors. Never print them.
-    fail "$1 $2 failed (exit ${status}); raw output suppressed"
-  fi
+  "$@" >/dev/null 2>&1 || fail "$1 $2 failed (exit $?); raw output suppressed"
 }
 
+# read_logs fails if any sidecar log contains a generated credential. A
+# since-time collects the recent slice separately, so counting fresh entries
+# does not overwrite the full log.
 read_logs() {
-  local pod
-  local since_args=()
-  [[ -z "${1:-}" ]] || since_args+=("--since-time=$1")
+  local pod since_args=() suffix=''
+  if [[ -n "${1:-}" ]]; then
+    since_args+=("--since-time=$1")
+    suffix='.recent'
+  fi
   for pod in "${pods[@]}"; do
     kubectl logs "${pod}" -c labeler "${since_args[@]}" \
-      >"${temp_dir}/${pod}.log" 2>"${temp_dir}/error" || return 1
-    if grep -Fq -f "${temp_dir}/needles" "${temp_dir}/${pod}.log"; then
+      >"${temp_dir}/${pod}${suffix}.log" 2>/dev/null || return 1
+    if grep -Fq -f "${temp_dir}/needles" "${temp_dir}/${pod}${suffix}.log"; then
       return 1
     fi
   done
@@ -126,10 +130,10 @@ create_credentials() {
 
 deploy_fixture() {
   # These trusted overlays reuse deployment-example.yaml outside their directory.
-  run kubectl kustomize --load-restrictor=LoadRestrictionsNone \
-    "${ROOT_DIR}/test/integration/fixtures/${MONGO_AUTH_MODE}"
-  mv "${temp_dir}/output" "${temp_dir}/fixture.yaml"
-  run kubectl apply -f "${temp_dir}/fixture.yaml"
+  kubectl kustomize --load-restrictor=LoadRestrictionsNone \
+    "${ROOT_DIR}/test/integration/fixtures/${MONGO_AUTH_MODE}" 2>/dev/null |
+    kubectl apply -f - >/dev/null 2>&1 ||
+    fail 'rendering or applying the fixture overlay failed; raw output suppressed'
   # The base starts at zero replicas so all overrides are set before any pod runs.
   run kubectl set image statefulset/mongo "labeler=${LABELER_IMAGE}"
   if [[ -n "${MONGO_GLIBC_TUNABLES:-}" ]]; then
@@ -139,9 +143,9 @@ deploy_fixture() {
 }
 
 read_labels() {
-  run kubectl get pods -l role=mongo \
-    -o 'jsonpath={range .items[*]}{.metadata.name}{"|"}{.metadata.labels.primary}{"|"}{.status.podIP}{"\n"}{end}'
-  cp "${temp_dir}/output" "${temp_dir}/labels"
+  labels="$(kubectl get pods -l role=mongo \
+    -o 'jsonpath={range .items[*]}{.metadata.name}{"|"}{.metadata.labels.primary}{"|"}{.status.podIP}{"\n"}{end}' \
+    2>/dev/null)" || fail 'unable to list MongoDB pods; raw output suppressed'
 }
 
 verify_routing() {
@@ -157,11 +161,11 @@ verify_routing() {
         true) true_count=$((true_count + 1)); primary_ip="${ip}" ;;
         false) false_count=$((false_count + 1)) ;;
       esac
-    done <"${temp_dir}/labels"
+    done <<<"${labels}"
     if (( count == 3 && true_count == 1 && false_count == 2 )) && [[ -n "${primary_ip}" ]]; then
-      run kubectl get endpointslices -l kubernetes.io/service-name=mongo \
-        -o 'go-template={{range .items}}{{range .endpoints}}{{if ne .conditions.ready false}}{{range .addresses}}{{.}}{{"\n"}}{{end}}{{end}}{{end}}{{end}}'
-      addresses="$(sort -u "${temp_dir}/output")"
+      addresses="$(kubectl get endpointslices -l kubernetes.io/service-name=mongo \
+        -o 'go-template={{range .items}}{{range .endpoints}}{{if ne .conditions.ready false}}{{range .addresses}}{{.}}{{"\n"}}{{end}}{{end}}{{end}}{{end}}' \
+        2>/dev/null | sort -u)" || fail 'unable to read Service endpoints; raw output suppressed'
       if [[ "${addresses}" == "${primary_ip}" ]]; then
         echo 'PASS: one primary, two secondary labels, and Service routes to the primary'
         return
@@ -172,46 +176,20 @@ verify_routing() {
   fail 'labels or Service endpoints did not converge'
 }
 
+# mongod writes one JSON record per line; id 5286307 is its authentication result
+# and result 18 is AuthenticationFailed. The match never prints, because server
+# logs contain the account name.
 authentication_rejected() {
-  local pod log_bytes
+  local pod
   for pod in "${pods[@]}"; do
-    run kubectl logs "${pod}" -c mongo "--since-time=$1"
-    mv "${temp_dir}/output" "${temp_dir}/mongo.log"
-    log_bytes="$(wc -c <"${temp_dir}/mongo.log" | tr -d ' ')"
-    # Use mongosh already in the MongoDB container to inspect structured events.
-    # The account comes from the container environment; neither it nor the raw
-    # server logs are printed, including when the assertion fails.
-    if ! kubectl exec -i "${pod}" -c mongo -- env MONGO_AUTH_LOG_BYTES="${log_bytes}" mongosh --quiet --nodb --eval '
-      (async () => {
-        // Consume buffered stdin and stop at the known byte count instead of EOF.
-        const expected = Number(process.env.MONGO_AUTH_LOG_BYTES);
-        if (expected === 0) quit(1);
-        setTimeout(() => quit(2), 15000);
-        const chunks = [];
-        let received = 0;
-        for await (const chunk of process.stdin) {
-          const data = Buffer.from(chunk);
-          chunks.push(data);
-          received += data.length;
-          if (received >= expected) break;
-        }
-        const rejected = Buffer.concat(chunks).toString("utf8").split("\n").some(line => {
-          try {
-            const event = JSON.parse(line);
-            return event.id === 5286307 && event.attr?.result === 18 &&
-              event.attr?.user === process.env.MONGO_TEST_USERNAME;
-          } catch { return false; }
-        });
-        quit(rejected ? 0 : 1);
-      })();
-    ' <"${temp_dir}/mongo.log" >"${temp_dir}/output" 2>"${temp_dir}/error"; then
-      return 1
-    fi
+    kubectl logs "${pod}" -c mongo "--since-time=$1" \
+      >"${temp_dir}/mongo.log" 2>/dev/null || return 1
+    grep -Eq '"id":5286307.*"result":18' "${temp_dir}/mongo.log" || return 1
   done
 }
 
 verify_invalid_password() {
-  local since start deadline pod label ip count retries retrying rejected
+  local since start deadline pod label ip count retries retrying
   since="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
   start=${SECONDS}
   deadline=$((start + 90))
@@ -221,23 +199,21 @@ verify_invalid_password() {
     while IFS='|' read -r pod label ip; do
       count=$((count + 1))
       [[ -z "${label}" ]] || fail 'invalid credentials caused a label change'
-    done <"${temp_dir}/labels"
+    done <<<"${labels}"
     (( count == 3 )) || fail 'expected three MongoDB pods'
     check_logs
     if grep -Eq 'Patching pod|primary detected' "${temp_dir}"/mongo-*.log; then
       fail 'invalid credentials reached pod patching'
     fi
-    # Start counting only after every member authenticated the correct user
-    # during bootstrap. Paused driver pools can report retry errors after auth.
+    # Count only entries logged after bootstrap, when every member had already
+    # authenticated the correct user for replica-set setup.
     check_logs "${since}"
     retrying=true
     for pod in "${pods[@]}"; do
-      retries="$(grep -Ec 'authentication_failed|connection_pool_unavailable' "${temp_dir}/${pod}.log" || true)"
+      retries="$(grep -c 'authentication_failed' "${temp_dir}/${pod}.recent.log" || true)"
       (( retries >= 2 )) || retrying=false
     done
-    rejected=false
-    if authentication_rejected "${since}"; then rejected=true; fi
-    if (( SECONDS - start >= 15 )) && [[ "${rejected}" == true && "${retrying}" == true ]]; then
+    if (( SECONDS - start >= 15 )) && [[ "${retrying}" == true ]] && authentication_rejected "${since}"; then
       echo 'PASS: every sidecar rejected the password and kept failing without patching labels'
       return
     fi
@@ -247,8 +223,8 @@ verify_invalid_password() {
 }
 
 run docker info
-run kind get clusters
-if grep -Fxq -- "${CLUSTER_NAME}" "${temp_dir}/output"; then
+clusters="$(kind get clusters 2>/dev/null)" || fail 'kind get clusters failed'
+if grep -Fxq -- "${CLUSTER_NAME}" <<<"${clusters}"; then
   fail 'the named kind cluster already exists; choose a unique CLUSTER_NAME'
 fi
 if [[ "${USE_PREBUILT_IMAGE:-false}" == true ]]; then

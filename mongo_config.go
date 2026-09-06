@@ -2,107 +2,102 @@ package main
 
 import (
 	"errors"
-	"fmt"
 	"net/url"
 	"os"
 	"strings"
 
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
-	"go.mongodb.org/mongo-driver/v2/x/mongo/driver/connstring"
 )
 
+// mongoOptionsFromEnvironment builds the MongoDB client options. Environment
+// credentials are passed through SetAuth, never spliced into the URI: the driver
+// retains the original URI string and echoes it in its own error messages.
 func mongoOptionsFromEnvironment(address string) (*options.ClientOptions, error) {
-	username, usernameSet := os.LookupEnv("MONGO_USERNAME")
-	password, passwordSet := os.LookupEnv("MONGO_PASSWORD")
-	source, sourceSet := os.LookupEnv("MONGO_AUTH_SOURCE")
-	envAuth := usernameSet || passwordSet || sourceSet
-	if envAuth && (!usernameSet || !passwordSet || username == "" || password == "") {
-		return nil, errors.New("MONGO_USERNAME and MONGO_PASSWORD must both be nonempty when authentication variables are set")
-	}
-	if sourceSet && source == "" {
-		return nil, errors.New("MONGO_AUTH_SOURCE must be nonempty when set")
+	username, password, source, envAuth, err := mongoCredentialsFromEnvironment()
+	if err != nil {
+		return nil, err
 	}
 
 	uri := address
-	if strings.HasPrefix(uri, "mongodb+srv://") {
+	switch {
+	case strings.HasPrefix(uri, "mongodb+srv://"):
 		return nil, errors.New("MONGO_ADDRESS must use a single direct endpoint; SRV is not supported")
-	}
-	if !strings.HasPrefix(uri, "mongodb://") {
-		if strings.Contains(uri, "://") {
-			return nil, errors.New("MONGO_ADDRESS has an unsupported scheme")
-		}
+	case strings.HasPrefix(uri, "mongodb://"):
+	case strings.Contains(uri, "://"):
+		return nil, errors.New("MONGO_ADDRESS has an unsupported scheme")
+	default:
 		uri = "mongodb://" + uri
 	}
-	parsed, err := connstring.Parse(uri)
-	if err != nil {
+
+	// ApplyURI defers its parse error to Validate. Call Validate before SetDirect
+	// so a multi-host URI reports the specific message below.
+	clientOptions := options.Client().ApplyURI(uri)
+	if err := clientOptions.Validate(); err != nil {
 		return nil, errors.New("invalid MONGO_ADDRESS: unable to parse MongoDB connection settings")
 	}
-	if len(parsed.Hosts) != 1 {
+	if len(clientOptions.Hosts) != 1 {
 		return nil, errors.New("MONGO_ADDRESS must contain exactly one host")
 	}
-	if envAuth && (parsed.UsernameSet || parsed.PasswordSet) {
-		return nil, errors.New("MONGO_ADDRESS credentials cannot be combined with MONGO_USERNAME, MONGO_PASSWORD, or MONGO_AUTH_SOURCE")
-	}
-
-	var credential *options.Credential
-	if envAuth {
-		// Validate the combined credentials using the driver's MongoDB-specific
-		// rules, then pass them with SetAuth, never by inserting them into a URI.
-		parsed.Username, parsed.Password = username, password
-		parsed.UsernameSet, parsed.PasswordSet = true, true
-		if sourceSet {
-			parsed.AuthSource = source
-		} else if parsed.AuthSource == "" {
-			parsed.AuthSource = parsed.Database
-			if parsed.AuthSource == "" {
-				parsed.AuthSource = "admin"
-			}
-		}
-		credential = &options.Credential{
-			Username: username, Password: password, PasswordSet: true,
-			AuthSource: parsed.AuthSource, AuthMechanism: parsed.AuthMechanism,
-			AuthMechanismProperties: parsed.AuthMechanismProperties,
-		}
-		// ApplyURI validates authentication before SetAuth can supply the user.
-		// Move authentication options into Credential while preserving the order
-		// and spelling of all other URI options (including ordered TLS options).
-		uri = withoutURIAuthOptions(uri)
-	}
-	if err := parsed.Validate(); err != nil {
-		return nil, errors.New("invalid MONGO_ADDRESS authentication or connection options")
-	}
-	clientOptions := options.Client().ApplyURI(uri).
-		SetDirect(true).SetMinPoolSize(1).SetMaxPoolSize(1).
+	clientOptions.SetDirect(true).SetMinPoolSize(1).SetMaxPoolSize(1).
 		SetLoggerOptions(options.Logger().SetSink(discardMongoLogs{}))
-	if credential != nil {
-		clientOptions.SetAuth(*credential)
+
+	if envAuth {
+		// Auth is set from URI user info, an authentication mechanism, or
+		// mechanism properties: each a conflicting source of credentials.
+		if clientOptions.Auth != nil {
+			return nil, errors.New("MONGO_ADDRESS credentials and authentication options cannot be combined with MONGO_USERNAME, MONGO_PASSWORD, or MONGO_AUTH_SOURCE")
+		}
+		if source == "" {
+			source = uriAuthSource(uri)
+		}
+		clientOptions.SetAuth(options.Credential{
+			Username:   username,
+			Password:   password,
+			AuthSource: source,
+		})
 	}
+	// Some URI options are only invalid in combination with the settings above,
+	// such as loadBalanced against a direct connection.
 	if err := clientOptions.Validate(); err != nil {
-		return nil, errors.New("invalid MONGO_ADDRESS client options")
+		return nil, errors.New("invalid MONGO_ADDRESS: unsupported connection options")
 	}
 	return clientOptions, nil
 }
 
-func withoutURIAuthOptions(uri string) string {
-	base, query, found := strings.Cut(uri, "?")
-	if !found {
-		return uri
+// mongoCredentialsFromEnvironment reads the credential variables. Setting any
+// one of them opts into authentication, so a partial pair is an error rather
+// than a silent fallback to an unauthenticated connection.
+func mongoCredentialsFromEnvironment() (username, password, source string, envAuth bool, err error) {
+	username, usernameSet := os.LookupEnv("MONGO_USERNAME")
+	password, passwordSet := os.LookupEnv("MONGO_PASSWORD")
+	source, sourceSet := os.LookupEnv("MONGO_AUTH_SOURCE")
+	envAuth = usernameSet || passwordSet || sourceSet
+	switch {
+	case envAuth && (username == "" || password == ""):
+		err = errors.New("MONGO_USERNAME and MONGO_PASSWORD must both be nonempty when authentication variables are set")
+	case sourceSet && source == "":
+		err = errors.New("MONGO_AUTH_SOURCE must be nonempty when set")
 	}
-	var keep []string
-	for _, option := range strings.FieldsFunc(query, func(r rune) bool { return r == '&' || r == ';' }) {
-		key, _, _ := strings.Cut(option, "=")
-		// The driver already checked escapes while parsing this URI.
-		key, _ = url.QueryUnescape(key)
-		switch strings.ToLower(key) {
-		case "authsource", "authmechanism", "authmechanismproperties":
-		default:
-			keep = append(keep, option)
+	return username, password, source, envAuth, err
+}
+
+// uriAuthSource returns the authentication database implied by a URI carrying no
+// credentials of its own. Option names are compared case-insensitively because
+// the driver lowercases them; ApplyURI has already accepted this URI.
+func uriAuthSource(uri string) string {
+	parsed, err := url.Parse(uri)
+	if err != nil {
+		return "admin"
+	}
+	for key, values := range parsed.Query() {
+		if strings.EqualFold(key, "authSource") && values[0] != "" {
+			return values[0]
 		}
 	}
-	if len(keep) == 0 {
-		return base
+	if database := strings.TrimPrefix(parsed.Path, "/"); database != "" {
+		return database
 	}
-	return fmt.Sprintf("%s?%s", base, strings.Join(keep, "&"))
+	return "admin"
 }
 
 // Driver logs have an independent environment-controlled sink. Suppress them

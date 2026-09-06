@@ -63,22 +63,23 @@ Environment variables:
 Supply `MONGO_USERNAME` and `MONGO_PASSWORD` from Kubernetes Secrets using
 `valueFrom.secretKeyRef`; the deployment example includes commented entries.
 Alternatively, supply the entire `MONGO_ADDRESS` from a Secret, with URI-encoded
-credentials. Combining URI credentials with any of the three authentication
-variables fails startup. An explicitly empty `MONGO_AUTH_SOURCE` also fails.
-Existing unauthenticated configurations continue to work.
+credentials. The two inputs are mutually exclusive: when any of the three
+authentication variables is set, a `MONGO_ADDRESS` that carries user info,
+`authMechanism`, or `authMechanismProperties` fails startup, as does an
+explicitly empty `MONGO_AUTH_SOURCE`.
 
-Authentication uses the MongoDB driver's default SCRAM negotiation unless a
-mechanism is specified in the URI. Restart the sidecar after rotating credentials
-or changing Secret-backed environment variables. MongoDB users are provisioned
-separately; the sidecar only runs `ping` and `hello`, which require no database
-roles. Those commands are also available without authentication, so successful
-primary detection alone does not prove that credentials were configured.
+Environment credentials always use the MongoDB driver's default SCRAM
+negotiation; pin a mechanism through URI credentials instead. Restart the sidecar
+after rotating credentials or changing Secret-backed environment variables.
+MongoDB users are provisioned separately; the sidecar only runs `ping` and
+`hello`, which require no database roles. Those commands are also available
+without authentication, so successful primary detection alone does not prove that
+credentials were configured.
 
-Logs show only the MongoDB host/port and whether authentication is configured.
-MongoDB failures report an operation, fixed error category, and an available
-numeric server code, without raw driver messages. Driver logging through
-`MONGODB_LOG_*` is suppressed even when `DEBUG=true` to keep credentials out of
-both startup and failure logs.
+Logs never carry credentials: startup reports the MongoDB host/port and whether
+authentication is configured, failures report an operation, a fixed category, and
+any server code, and driver logging through `MONGODB_LOG_*` stays suppressed even
+when `DEBUG=true`.
 
 ## Published image
 
@@ -100,8 +101,7 @@ docker pull ghcr.io/combor/k8s-mongo-labeler-sidecar:0.7.2
 
 The repository includes an end-to-end test environment in `test/integration`.
 The checked-in Kustomize overlays in `test/integration/fixtures` define each
-scenario and share the deployment example as their base. The Bash runner applies
-the selected overlay, sets the local image, and starts the three MongoDB pods.
+scenario and share the deployment example as their base.
 
 Prerequisites:
 
@@ -136,21 +136,20 @@ The `env` and `uri` scenarios enforce MongoDB authentication using a generated
 replica-set keyfile and test user, then test the respective credential inputs.
 The `invalid` scenario starts fresh, unlabeled pods with the wrong password and
 checks that every sidecar repeatedly fails authentication without patching any
-labels. All scenarios run the sidecar with debug logging enabled. The harness
-checks logs for generated credentials and their encoded forms before printing
-diagnostics; MongoDB server logs are not printed because they can contain
-usernames. Temporary credential files are removed during cleanup; generated
-Secrets are deleted with the disposable cluster.
+labels. All scenarios run the sidecar with debug logging enabled. Sidecar logs
+are scanned for the generated credentials before any diagnostics are printed;
+MongoDB server logs are only matched, never printed, because they contain
+usernames.
 
 CI runs all four scenarios against the current source on pull requests and
 before releases. To run an authenticated scenario locally, use
 `MONGO_AUTH_MODE=env CLUSTER_NAME=mongo-labeler-auth-env ./test/integration/run.sh`.
 
 MongoDB 8.3.8 can refuse to start on newer Linux kernels due to its TCMalloc/rseq
-compatibility check. For local tests on an affected host, the Docker image
-maintainers describe using `glibc.pthread.rseq=1`; pass it with
-`MONGO_GLIBC_TUNABLES=glibc.pthread.rseq=1`. This override applies only to the test
-containers. See the [upstream discussion](https://github.com/docker-library/mongo/discussions/748).
+compatibility check. On an affected host, pass the workaround the Docker image
+maintainers describe — `MONGO_GLIBC_TUNABLES=glibc.pthread.rseq=1` — which
+applies only to the test containers. See the
+[upstream discussion](https://github.com/docker-library/mongo/discussions/748).
 
 ## Run CI locally with act
 

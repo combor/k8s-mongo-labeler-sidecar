@@ -239,8 +239,7 @@ func getConfigFromEnvironment() (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
-	// Address is safe for diagnostics after validation. The original URI and
-	// credentials are retained only inside the private client options.
+	// Narrow Address to the host so nothing downstream can log a URI credential.
 	config.Address = config.mongoOptions.Hosts[0]
 
 	return config, nil
@@ -348,7 +347,7 @@ func (l *Labeler) getMongoPrimary() (string, error) {
 	}
 	primary, err := parsePrimaryPodName(hello)
 	if err != nil {
-		return "", newMongoFailure("parse_primary", l.Config.Address, err)
+		return "", newMongoFailure("parse_primary", err)
 	}
 	return primary, nil
 }
@@ -361,20 +360,20 @@ func (l *Labeler) fetchHello(ctx context.Context) (bson.M, error) {
 	if l.mongoClient == nil {
 		client, err := mongo.Connect(l.Config.mongoOptions)
 		if err != nil {
-			return nil, newMongoFailure("connect", l.Config.Address, err)
+			return nil, newMongoFailure("connect", err)
 		}
 		l.mongoClient = client
 	}
 
 	if err := l.mongoClient.Ping(ctx, nil); err != nil {
-		return nil, newMongoFailure("ping", l.Config.Address, err)
+		return nil, newMongoFailure("ping", err)
 	}
 
 	var hello bson.M
 	if err := l.mongoClient.Database("admin").
 		RunCommand(ctx, bson.D{{Key: "hello", Value: 1}}).
 		Decode(&hello); err != nil {
-		return nil, newMongoFailure("hello", l.Config.Address, err)
+		return nil, newMongoFailure("hello", err)
 	}
 	return hello, nil
 }
@@ -386,7 +385,7 @@ func (l *Labeler) closeMongo(ctx context.Context) {
 		return
 	}
 	if err := l.mongoClient.Disconnect(ctx); err != nil {
-		phuslog.Debug().Err(newMongoFailure("disconnect", l.Config.Address, err)).Msg("unable to close mongo connection")
+		phuslog.Debug().Err(newMongoFailure("disconnect", err)).Msg("unable to close mongo connection")
 	}
 	l.mongoClient = nil
 }
