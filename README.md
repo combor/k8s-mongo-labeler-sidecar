@@ -88,7 +88,7 @@ Container images are published to GHCR at:
 `ghcr.io/combor/k8s-mongo-labeler-sidecar`, for `linux/amd64` and `linux/arm64`.
 
 ```bash
-docker pull ghcr.io/combor/k8s-mongo-labeler-sidecar:0.7.2
+docker pull ghcr.io/combor/k8s-mongo-labeler-sidecar:0.8.0
 ```
 
 ## Deployment
