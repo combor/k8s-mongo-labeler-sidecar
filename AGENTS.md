@@ -1,54 +1,31 @@
 # AGENTS.md
 
-This file is a quick guide for AI coding agents and human contributors working on this repo.
+Go sidecar that detects the MongoDB replica-set primary and patches Kubernetes Pod labels for service routing. Code and unit tests are in `main.go` and `main_test.go`.
 
-## Project scope
+## Behavioral contracts
 
-This repository builds `k8s-mongo-labeler-sidecar`, a Go sidecar that detects the MongoDB replica-set primary and patches Kubernetes Pod labels for service routing.
+- `LABEL_SELECTOR` must be set; missing configuration fails startup.
+- Primary pods receive `primary="true"`. Other pods receive `primary="false"` when `LABEL_ALL=true`; otherwise remove the label using a JSON `null` patch value.
+- Demote or unlabel other pods before promoting the primary. Stop reconciliation on patch failure and skip labels already in the desired state.
+- Keep Pod RBAC limited to `get`, `list`, and `patch`.
+- Preserve sidecar hardening: non-root, read-only root filesystem, no privilege escalation, all capabilities dropped, and `RuntimeDefault` seccomp.
 
-## Stack and runtime
+## Making changes
 
-- Language: Go
-- Main entrypoint: `main.go`
-- Unit tests: `main_test.go`
-- Integration test: `test/integration/run.sh` (kind + Docker + kubectl)
-- Release/container files: `Dockerfile`, `Dockerfile.dist`, `.goreleaser.yaml`
-- CI workflows: `.github/workflows/ci-release.yml`, `.github/workflows/codeql-analysis.yml`
+- Keep changes focused and add regression coverage for behavior changes. Review findings must identify affected code and a concrete failure scenario.
+- Update `README.md` and `deployment-example.yaml` when behavior or environment variables change.
+- `dist/` contains generated release artifacts; regenerate them rather than editing them.
+- Use the Go version in `go.mod` and linter version in CI. Keep the Docker builder's Go version aligned.
+- Commit messages should explain why the change was needed.
 
-## Behavioral invariants (do not change unintentionally)
+## Validation
 
-- `LABEL_SELECTOR` is required; startup fails if missing.
-- Label behavior:
-  - Primary pod: set `primary=true`
-  - Non-primary pods with `LABEL_ALL=true`: set `primary=false`
-  - Non-primary pods with `LABEL_ALL=false`: remove the `primary` label via `null` patch value
+Run applicable checks from the repository root:
 
-## Editing guidance
+- Go code, tests, dependencies, or Go/lint configuration: `go test ./...` and `golangci-lint run --timeout=10m`.
+- Go code or dependency changes: also `go run golang.org/x/vuln/cmd/govulncheck@latest ./...`.
+- Labeling, Kubernetes interactions, manifests, images, or integration harness changes: also `./test/integration/run.sh`. Requires kind, kubectl, Docker, and Buildx. Use a unique `CLUSTER_NAME` and temporary `KUBECONFIG`; the script deletes its named cluster.
+- Release changes: run `goreleaser check` and check the release configuration, `Dockerfile.dist`, and integration harness together.
+- Prose-only changes: check the diff and referenced paths/commands; Go and integration checks are unnecessary.
 
-- Prefer small, focused changes in `main.go` and matching updates in `main_test.go`.
-- If behavior or env vars change, update `README.md` and `deployment-example.yaml` in the same PR.
-- Keep RBAC least-privilege (`pods`: `get`, `list`, `patch`).
-- Preserve secure defaults in manifests/images (non-root, dropped capabilities, `readOnlyRootFilesystem`, runtime default seccomp).
-- Do not hand-edit `dist/` artifacts unless the task is explicitly release-artifact related.
-- Keep scope tight to the changed areas; avoid broad refactors
-- Prefer small, reliable tests that fail before and pass after
-- Avoid overconfident root-cause claims
-- Do NOT invent bugs; if evidence is weak, say so and skip.
-- Prefer the smallest safe fix; avoid refactors and unrelated cleanup.
-- Anchor each suggestion to concrete evidence
-- Avoid generic advice; make each recommendation actionable and specific
-- in the commit messages provide explanation why the chage was made
-
-## Validation checklist
-
-From the repo root, before finishing a change:
-
-1. Run unit tests: `go test ./...`
-2. Run linter: `golangci-lint run --timeout=10m`
-3. When changing labeling logic, Kubernetes interactions, manifests, or image behavior, also run the integration test: `./test/integration/run.sh`
-
-## CI awareness
-
-- PR/push runs lint + unit tests.
-- Tag push additionally runs release binaries, multi-arch image build/push, and the integration test.
-- Changes affecting the release flow should be checked across `Dockerfile.dist`, `.goreleaser.yaml`, and `test/integration/run.sh`.
+Report checks run and any failures or unavailable prerequisites. Repeat passing checks only after relevant changes or new evidence.
