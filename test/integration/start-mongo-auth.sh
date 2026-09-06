@@ -15,13 +15,16 @@ if [[ "${HOSTNAME}" == "mongo-0" ]]; then
   done
   # The localhost exception permits replica-set initialization and creation of
   # the first user. Secrets are read by mongosh from its environment, never argv.
+  # Both are one-time steps: a container restart keeps the emptyDir dbPath, so
+  # they fail on the way back up and must not take the container down with them.
+  # The readiness gate below is what decides whether bootstrap actually worked.
   mongosh --quiet --eval 'rs.initiate({
     _id: "rs0", members: [
       {_id: 0, host: "mongo-0.mongo-cluster:27017", priority: 2},
       {_id: 1, host: "mongo-1.mongo-cluster:27017"},
       {_id: 2, host: "mongo-2.mongo-cluster:27017"}
     ]
-  })' >/dev/null 2>&1
+  })' >/dev/null 2>&1 || true
   until mongosh --quiet --eval 'quit(db.hello().isWritablePrimary ? 0 : 1)' >/dev/null 2>&1; do
     sleep 1
   done
@@ -31,7 +34,7 @@ if [[ "${HOSTNAME}" == "mongo-0" ]]; then
     user: process.env.MONGO_TEST_USERNAME,
     pwd: process.env.MONGO_TEST_PASSWORD,
     roles: []
-  })' >/dev/null 2>&1
+  })' >/dev/null 2>&1 || true
 fi
 
 # Mark every member ready only after its local server can authenticate the

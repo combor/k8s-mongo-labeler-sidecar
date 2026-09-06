@@ -2,11 +2,11 @@ package main
 
 import (
 	"errors"
-	"net/url"
 	"os"
 	"strings"
 
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
+	"go.mongodb.org/mongo-driver/v2/x/mongo/driver/connstring"
 )
 
 // mongoOptionsFromEnvironment builds the MongoDB client options. Environment
@@ -23,7 +23,7 @@ func mongoOptionsFromEnvironment(address string) (*options.ClientOptions, error)
 	case strings.HasPrefix(uri, "mongodb+srv://"):
 		return nil, errors.New("MONGO_ADDRESS must use a single direct endpoint; SRV is not supported")
 	case strings.HasPrefix(uri, "mongodb://"):
-	case strings.Contains(uri, "://"):
+	case hasScheme(uri):
 		return nil, errors.New("MONGO_ADDRESS has an unsupported scheme")
 	default:
 		uri = "mongodb://" + uri
@@ -64,6 +64,13 @@ func mongoOptionsFromEnvironment(address string) (*options.ClientOptions, error)
 	return clientOptions, nil
 }
 
+// hasScheme reports whether address begins with a URI scheme. A "://" further in
+// belongs to an option value, such as an appName holding a URL.
+func hasScheme(address string) bool {
+	scheme, _, found := strings.Cut(address, "://")
+	return found && !strings.ContainsAny(scheme, ":/?@")
+}
+
 // mongoCredentialsFromEnvironment reads the credential variables. Setting any
 // one of them opts into authentication, so a partial pair is an error rather
 // than a silent fallback to an unauthenticated connection.
@@ -82,20 +89,19 @@ func mongoCredentialsFromEnvironment() (username, password, source string, envAu
 }
 
 // uriAuthSource returns the authentication database implied by a URI carrying no
-// credentials of its own. Option names are compared case-insensitively because
-// the driver lowercases them; ApplyURI has already accepted this URI.
+// credentials of its own. The driver's own parser decides, so option spelling,
+// separators, and escaping match the connection the driver will make; net/url
+// disagrees on all three. ApplyURI has already accepted this URI.
 func uriAuthSource(uri string) string {
-	parsed, err := url.Parse(uri)
+	parsed, err := connstring.Parse(uri)
 	if err != nil {
 		return "admin"
 	}
-	for key, values := range parsed.Query() {
-		if strings.EqualFold(key, "authSource") && values[0] != "" {
-			return values[0]
-		}
+	if parsed.AuthSource != "" {
+		return parsed.AuthSource
 	}
-	if database := strings.TrimPrefix(parsed.Path, "/"); database != "" {
-		return database
+	if parsed.Database != "" {
+		return parsed.Database
 	}
 	return "admin"
 }

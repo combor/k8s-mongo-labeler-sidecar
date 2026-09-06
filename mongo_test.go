@@ -60,8 +60,12 @@ func TestMongoAuthenticationConfiguration(t *testing.T) {
 		{name: "environment credentials", env: credentials, source: "admin"},
 		{name: "database fallback", address: "mongo:27017/application", env: credentials, source: "application"},
 		{name: "URI source", address: "mongo:27017/application?authSource=users", env: credentials, source: "users"},
-		// The driver lowercases option names, so the sidecar must match them the same way.
+		// The driver lowercases option names and accepts ";" as a separator, so the
+		// sidecar must read the source exactly as the driver does.
 		{name: "lowercase URI source", address: "mongo:27017/application?authsource=users", env: credentials, source: "users"},
+		{name: "legacy option separator", address: "mongo:27017/?authSource=users;appName=labeler", env: credentials, source: "users", appName: "labeler"},
+		// Only a leading scheme is one; this "://" belongs to the option value.
+		{name: "option value holding a URL", address: "mongo:27017/?appName=https://example.test", env: credentials, source: "admin", appName: "https://example.test"},
 		{name: "environment source takes precedence", address: "mongodb://mongo:27017/application?authSource=users", env: map[string]string{"MONGO_USERNAME": testMongoUser, "MONGO_PASSWORD": testMongoPassword, "MONGO_AUTH_SOURCE": "accounts"}, source: "accounts"},
 		{name: "URI options with environment credentials", address: "mongo:27017/?appName=labeler", env: credentials, source: "admin", appName: "labeler"},
 		{name: "explicit SCRAM with URI credentials", address: "mongodb://" + userinfo + "@mongo:27017/?authSource=users&authMechanism=SCRAM-SHA-256", source: "users", mechanism: "SCRAM-SHA-256"},
