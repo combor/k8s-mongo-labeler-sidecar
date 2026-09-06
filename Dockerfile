@@ -1,5 +1,5 @@
-# syntax=docker/dockerfile:1.26
-FROM --platform=$BUILDPLATFORM golang:1.26.5-trixie AS builder
+# syntax=docker/dockerfile:1.27
+FROM --platform=$BUILDPLATFORM golang:1.27.1-trixie AS builder
 
 ARG TARGETOS=linux
 ARG TARGETARCH

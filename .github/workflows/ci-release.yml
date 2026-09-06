@@ -36,7 +36,7 @@ jobs:
     - name: Run golangci-lint
       uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
       with:
-        version: v2.12.2
+        version: v2.13.2
         args: --timeout=10m
 
   test-coverage:
@@ -152,7 +152,7 @@ jobs:
 
     - name: Set up QEMU
       if: matrix.arch != 'amd64'
-      uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4.2.0
+      uses: docker/setup-qemu-action@1f40c72289eff860ee54a304f1438e3cff362e0a # v4.3.0
 
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
@@ -259,10 +259,10 @@ jobs:
       uses: azure/setup-kubectl@829323503d1be3d00ca8346e5391ca0b07a9ab0d # v5.1.0
 
     - name: Set up kind
-      uses: helm/kind-action@ef37e7f390d99f746eb8b610417061a60e82a6cc # v1.14.0
+      uses: helm/kind-action@06c1ae10762d3b9c1644e7fe69596ae519e015a2 # v1.15.0
       with:
         cluster_name: kind-mongo-labeler
-        version: v0.32.0
+        version: v0.33.0
         install_only: true
 
     - name: Run integration test
