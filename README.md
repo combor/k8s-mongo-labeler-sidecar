@@ -93,7 +93,7 @@ docker pull ghcr.io/combor/k8s-mongo-labeler-sidecar:0.8.0
 
 ## Deployment
 
-[deployment-example.yaml](deployment-example.yaml) provides a three-member replica-set example.
+[deployment-example.yaml](deployment-example.yaml) provides a three-member replica-set example using MongoDB 8.3.9.
 
 > **Demo only:** MongoDB has no authentication or TLS; `emptyDir` data is lost when pods are removed. Configure authentication, TLS, and persistent storage for production. The NetworkPolicy limits ingress to same-namespace traffic on port 27017 only when enforced by the CNI.
 
@@ -145,9 +145,9 @@ CI runs all four scenarios against the current source on pull requests and
 before releases. To run an authenticated scenario locally, use
 `MONGO_AUTH_MODE=env CLUSTER_NAME=mongo-labeler-auth-env ./test/integration/run.sh`.
 
-MongoDB 8.3.8 can refuse to start on newer Linux kernels due to its TCMalloc/rseq
+Some MongoDB builds can refuse to start on newer Linux kernels due to their TCMalloc/rseq
 compatibility check. On an affected host, pass the workaround the Docker image
-maintainers describe — `MONGO_GLIBC_TUNABLES=glibc.pthread.rseq=1` — which
+maintainers describe, `MONGO_GLIBC_TUNABLES=glibc.pthread.rseq=1`, which
 applies only to the test containers. See the
 [upstream discussion](https://github.com/docker-library/mongo/discussions/748).
 
