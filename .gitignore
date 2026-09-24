@@ -7,3 +7,4 @@ dist/
 
 # Local build output (go build -o k8s-mongo-labeler-sidecar .)
 /k8s-mongo-labeler-sidecar
+/graphify-out
