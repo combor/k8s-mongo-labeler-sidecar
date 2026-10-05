@@ -3,7 +3,7 @@ module github.com/combor/k8s-mongo-labeler-sidecar
 go 1.27.1
 
 require (
-	github.com/phuslu/log v1.0.135
+	github.com/phuslu/log v1.0.137
 	github.com/stretchr/testify v1.12.1
 	go.mongodb.org/mongo-driver/v2 v2.9.1
 	k8s.io/api v0.37.1
