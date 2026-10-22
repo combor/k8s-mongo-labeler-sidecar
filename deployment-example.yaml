@@ -109,7 +109,7 @@ spec:
           type: RuntimeDefault
       containers:
       - name: mongo
-        image: mongo:9.0.2
+        image: mongo:9.0.4-resolute
         command: ["/bin/bash", "/scripts/start-mongo.sh"]
         # Hardening: drop all Linux capabilities and block privilege
         # escalation. mongod needs no capabilities (it binds 27017, a non-privileged

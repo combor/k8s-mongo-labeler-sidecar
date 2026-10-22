@@ -93,7 +93,7 @@ docker pull ghcr.io/combor/k8s-mongo-labeler-sidecar:0.8.2
 
 ## Deployment
 
-[deployment-example.yaml](deployment-example.yaml) provides a three-member replica-set example using MongoDB 9.0.2.
+[deployment-example.yaml](deployment-example.yaml) provides a three-member replica-set example using MongoDB 9.0.4.
 
 > **Demo only:** MongoDB has no authentication or TLS; `emptyDir` data is lost when pods are removed. Configure authentication, TLS, and persistent storage for production. The NetworkPolicy limits ingress to same-namespace traffic on port 27017 only when enforced by the CNI.
 
