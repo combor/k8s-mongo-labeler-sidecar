@@ -9,6 +9,14 @@ updates:
     cooldown:
       default-days: 7
 
+  # Base images, pinned by digest in Dockerfile and Dockerfile.dist
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    cooldown:
+      default-days: 7
+
   # Gomod updates
   - package-ecosystem: "gomod"
     directory: "/"
