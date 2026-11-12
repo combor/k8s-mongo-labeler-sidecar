@@ -26,6 +26,7 @@ Run applicable checks from the repository root:
 - Go code or dependency changes: also `go run golang.org/x/vuln/cmd/govulncheck@latest ./...`.
 - Labeling, Kubernetes interactions, manifests, images, or integration harness changes: also `./test/integration/run.sh`. Requires kind, kubectl, Docker, and Buildx. Use a unique `CLUSTER_NAME` and temporary `KUBECONFIG`; the script deletes its named cluster.
 - Release changes: run `goreleaser check` and check the release configuration, `Dockerfile.dist`, and integration harness together.
+- Workflow changes (`.github/workflows/`): after adding a workflow or changing any `uses:` line, run `gh actions-lock` and commit `.github/workflows/actions.lock`; CI fails on a stale lockfile. Also run `zizmor .` (v1.32.0 or newer; older versions do not understand the lockfile).
 - Prose-only changes: check the diff and referenced paths/commands; Go and integration checks are unnecessary.
 
 Report checks run and any failures or unavailable prerequisites. Repeat passing checks only after relevant changes or new evidence.
