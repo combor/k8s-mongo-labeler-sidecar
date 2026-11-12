@@ -4,6 +4,7 @@
 version: 'v0.0.3'
 workflows:
     '.github/workflows/ci-release.yml':
+        - 'actions/attest@v4.2.2'
         - 'actions/checkout@v7.0.1'
         - 'actions/setup-go@v7.0.0'
         - 'azure/setup-kubectl@v5.2.0'
@@ -22,6 +23,11 @@ workflows:
         - 'actions/checkout@v7.0.1'
         - 'github/codeql-action@v4.39.3'
 dependencies:
+    'actions/attest@v4.2.2':
+        ref: 'v4.2.2'
+        commit: 'sha1-1e69f48acb82d1966a394da916b4c1698aa569d6'
+        owner_id: 44036562
+        repo_id: 760701061
     'actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd':
         ref: 'v6.0.2'
         commit: 'sha1-de0fac2e4500dabe0009e67214ff5f5447ce83dd'

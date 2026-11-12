@@ -238,6 +238,9 @@ jobs:
       uses: docker/metadata-action@v6.2.0
       with:
         images: ghcr.io/${{ github.repository }}
+        # The manifest job tags latest on the multi-arch image. Left on, each
+        # single-arch push here would move latest to whichever arch finished last.
+        flavor: latest=false
         tags: |
           type=ref,event=tag,suffix=-${{ matrix.arch }}
           type=sha,prefix=sha-,format=long,suffix=-${{ matrix.arch }}
@@ -264,6 +267,9 @@ jobs:
     timeout-minutes: 10
     permissions:
       packages: write
+      # Sign the image's build provenance with GitHub's attestation service.
+      id-token: write
+      attestations: write
 
     steps:
     - name: Log in to GitHub Container Registry
@@ -274,6 +280,7 @@ jobs:
         password: ${{ secrets.GITHUB_TOKEN }}
 
     - name: Create manifest lists
+      id: build
       run: |
         IMAGE="ghcr.io/${GITHUB_REPOSITORY,,}"
         SHA="sha-${GITHUB_SHA}"
@@ -283,9 +290,23 @@ jobs:
         docker buildx imagetools create -t "${IMAGE}:${SHA}" \
           "${IMAGE}:${SHA}-amd64" "${IMAGE}:${SHA}-arm64"
 
-        # Create :<tag> manifest
-        docker buildx imagetools create -t "${IMAGE}:${TAG}" \
+        # Create :<tag> manifest, and move latest to it unless the tag is a
+        # prerelease such as 0.9.0-rc1.
+        tags=(-t "${IMAGE}:${TAG}")
+        [[ "$TAG" == *-* ]] || tags+=(-t "${IMAGE}:latest")
+        docker buildx imagetools create "${tags[@]}" \
           "${IMAGE}:${TAG}-amd64" "${IMAGE}:${TAG}-arm64"
+
+        digest=$(docker buildx imagetools inspect "${IMAGE}:${TAG}" --format '{{json .Manifest}}' | jq -r .digest)
+        echo "digest=${digest}" >> "$GITHUB_OUTPUT"
+
+    # Anyone can check where the image came from with:
+    #   gh attestation verify oci://ghcr.io/combor/k8s-mongo-labeler-sidecar:TAG -R combor/k8s-mongo-labeler-sidecar
+    - name: Attest the image
+      uses: actions/attest@v4.2.2
+      with:
+        subject-name: ghcr.io/combor/k8s-mongo-labeler-sidecar
+        subject-digest: ${{ steps.build.outputs.digest }}
 
   integration-test:
     name: Integration test (${{ matrix.auth }})
